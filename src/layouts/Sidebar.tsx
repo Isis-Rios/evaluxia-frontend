@@ -27,14 +27,18 @@ import {
 import { useState } from 'react'
 import logo from '@assets/images/logo-white.png'
 import type { RootState } from '@app/store'
-import { useSelector } from 'react-redux'
+import { useSelector, useDispatch } from 'react-redux'
+import { logout } from '@features/auth/authSlice'
+import { useNavigate } from 'react-router-dom'
 
 const drawerWidth = 300
 
 export default function Sidebar() {
   const activeProfile = useSelector((state: RootState) => state.auth.user)
+  const dispatch = useDispatch()
   const [open, setOpen] = useState(true)
   const theme = useTheme()
+  const navigate = useNavigate()
 
   return (
     <Drawer
@@ -115,15 +119,15 @@ export default function Sidebar() {
 
           {/* Menú */}
           <List sx={{ color: '#fff' }}>
-            {[{ icon: <Home />, label: 'Inicio' },
-              { icon: <RecentActors />, label: 'Perfiles evaluadores' },
-              { icon: <Web />, label: 'Evaluar sitio web' },
-              { icon: <CropOriginal />, label: 'Evaluar prototipo' },
-              { icon: <AccountTree />, label: 'Ejecutar flujo' },
-              { icon: <WorkHistory />, label: 'Historial' }
+            {[{ icon: <Home />, label: 'Inicio', path: '/inicio' },
+              { icon: <RecentActors />, label: 'Perfiles evaluadores', path: '/perfiles' },
+              { icon: <Web />, label: 'Evaluar sitio web', path: '/evaluate/web' },
+              { icon: <CropOriginal />, label: 'Evaluar prototipo', path: '/evaluate/prototype' },
+              { icon: <AccountTree />, label: 'Ejecutar flujo', path: '/evaluate/flow' },
+              { icon: <WorkHistory />, label: 'Historial', path: '/historial' }
             ].map((item, index) => (
               <Tooltip key={index} title={!open ? item.label : ''} placement="right">
-                <ListItemButton>
+                <ListItemButton onClick={() => navigate(item.path)}>
                   <ListItemIcon sx={{ color: '#fff' }}>{item.icon}</ListItemIcon>
                   {open && <ListItemText primary={item.label} />}
                 </ListItemButton>
@@ -143,7 +147,10 @@ export default function Sidebar() {
           }}
         >
           <List sx={{ color: theme.palette.primary.main }}>
-            <ListItemButton>
+            <ListItemButton onClick={() => {
+              dispatch(logout())
+              navigate('/login')
+            }}>
               <ListItemIcon sx={{ color: theme.palette.primary.main }}>
                 <Logout />
               </ListItemIcon>

@@ -21,6 +21,7 @@ import {
   import CheckCircleIcon from '@mui/icons-material/CheckCircle'
   import PersonAddIcon from '@mui/icons-material/PersonAdd';
   import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+  import { useNavigate } from 'react-router-dom';
   
 // 1. Lista de perfiles evaluadores
 const userProfiles = [
@@ -106,6 +107,7 @@ const archetypeTooltips: any = {
 
   export default function UserEvaluatorProfilesPage() {
     const theme = useTheme()
+    const navigate = useNavigate()
   
     return (
       <Box p={0}>
@@ -118,7 +120,7 @@ const archetypeTooltips: any = {
             variant="contained"
             color="primary"
             startIcon={<PersonAddIcon />}
-            //onClick={handleAddProfile} // Puedes reemplazar esta función con tu lógica
+            onClick={() => navigate('/nuevo-perfil')}
           >
             Nuevo perfil
           </Button>

@@ -39,7 +39,7 @@ export default function LoginPage() {
     const fakeToken = 'fake-jwt-token'
 
     dispatch(loginSuccess({ user: fakeUser, token: fakeToken }))
-    navigate('/historial')
+    navigate('/inicio')
   }
 
   return (
