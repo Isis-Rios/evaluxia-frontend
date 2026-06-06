@@ -18,7 +18,7 @@ import {
     onFileUpload?: (files: FileList) => void;
   }
   
-  export default function AgentPanel({ context, showAttachments, messages, onSendMessage, onFileUpload }: AgentPanelProps) {
+  export default function AgentPanel({ showAttachments, messages, onSendMessage, onFileUpload }: AgentPanelProps) {
     const inputRef = useRef<HTMLInputElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 

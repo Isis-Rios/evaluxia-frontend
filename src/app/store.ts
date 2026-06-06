@@ -1,27 +1,15 @@
-/* import { configureStore } from '@reduxjs/toolkit'
-import authReducer from '@features/auth/authSlice'
-
-export const store = configureStore({
-  reducer: {
-    auth: authReducer,
-  },
-})
-
-// Inferir tipos para TypeScript
-export type RootState = ReturnType<typeof store.getState>
-export type AppDispatch = typeof store.dispatch */
-
+// src/app/store.ts
 import { configureStore } from '@reduxjs/toolkit'
-import authReducer from '@features/auth/authSlice'
-
+import { combineReducers } from 'redux'
 import storage from 'redux-persist/lib/storage'
 import { persistReducer, persistStore } from 'redux-persist'
-import { combineReducers } from 'redux'
+
+import authReducer from '@features/auth/authSlice'
 
 const persistConfig = {
-  key: 'root',
+  key: 'evaluxia-root',
   storage,
-  whitelist: ['auth'], // solo persistimos la parte de auth
+  whitelist: ['auth'], // solo auth se persiste; otros slices futuros opt-in
 }
 
 const rootReducer = combineReducers({
@@ -34,12 +22,12 @@ export const store = configureStore({
   reducer: persistedReducer,
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
-      serializableCheck: false, // necesario para evitar warnings con redux-persist
+      serializableCheck: false, // requerido por redux-persist
     }),
 })
 
 export const persistor = persistStore(store)
 
+// Tipos derivados — fuente única de verdad para TypeScript
 export type RootState = ReturnType<typeof store.getState>
 export type AppDispatch = typeof store.dispatch
-
