@@ -117,6 +117,15 @@ export default function LoginPage() {
               </Box>
 
               {/* Formulario */}
+              <Box
+                component="form"
+                onSubmit={handleSubmit(onSubmit)}
+                noValidate
+                display="flex"
+                flexDirection="column"
+                height="100%"
+                justifyContent="space-between"
+              >
               <Box>
                 <Typography
                   variant="h5"
@@ -136,22 +145,9 @@ export default function LoginPage() {
                   Bienvenido de nuevo 👋
                 </Typography>
 
-                {/* Alerta de error de autenticación */}
-                {error && (
-                  <Alert
-                    severity="error"
-                    onClose={clearError}
-                    sx={{ mb: 2 }}
-                    id="login-error-alert"
-                  >
-                    {error}
-                  </Alert>
-                )}
-
+              
                 <Box
-                  component="form"
-                  onSubmit={handleSubmit(onSubmit)}
-                  noValidate
+                  
                   sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}
                 >
                   <TextField
@@ -179,6 +175,40 @@ export default function LoginPage() {
                     helperText={errors.password?.message}
                   />
 
+                  
+                </Box>
+
+                
+
+                {/* Se implementará más adelante
+                <Typography
+                  variant="body2"
+                  sx={{ mt: { md: 3, xs: 2 }, textAlign: 'center', color: theme.palette.secondary.main }}
+                >
+                  ¿Olvidaste tu contraseña?{' '}
+                  <Box
+                    component="a"
+                    href="#"
+                    sx={{ color: theme.palette.info.main, fontWeight: 600, textDecoration: 'underline' }}
+                  >
+                    Recupérala
+                  </Box>
+                </Typography> */}
+              </Box>
+
+              <Box>
+                {/* Alerta de error de autenticación */}
+                  {error && (
+                    <Alert
+                      severity="error"
+                      onClose={clearError}
+                      sx={{ mb: 1 }}
+                      id="login-error-alert"
+                    >
+                      {error}
+                    </Alert>
+                  )}
+
                   <Button
                     id="login-submit-btn"
                     type="submit"
@@ -200,24 +230,11 @@ export default function LoginPage() {
                   >
                     {isLoading ? 'Iniciando sesión...' : 'Ingresar'}
                   </Button>
-                </Box>
-
-                <Typography
-                  variant="body2"
-                  sx={{ mt: { md: 3, xs: 2 }, textAlign: 'center', color: theme.palette.secondary.main }}
-                >
-                  ¿Olvidaste tu contraseña?{' '}
-                  <Box
-                    component="a"
-                    href="#"
-                    sx={{ color: theme.palette.info.main, fontWeight: 600, textDecoration: 'underline' }}
-                  >
-                    Recupérala
-                  </Box>
-                </Typography>
               </Box>
 
-              {/* Registro */}
+                  
+
+              {/* Se implementará más adelante
               <Box textAlign="center" sx={{ mt: { md: 3, xs: 4 } }}>
                 <Typography variant="body2" color={theme.palette.secondary.main}>
                   ¿No tienes una cuenta?
@@ -236,6 +253,7 @@ export default function LoginPage() {
                 >
                   Regístrate
                 </Button>
+              </Box> */}
               </Box>
             </Box>
           </Grid>

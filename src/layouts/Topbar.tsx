@@ -5,27 +5,35 @@ import {
   Box,
   Button,
   CircularProgress,
-  IconButton,
   Toolbar,
   Tooltip,
   Typography,
   useTheme,
 } from '@mui/material'
-import LogoutIcon from '@mui/icons-material/Logout'
-import { useAuth } from '@hooks/useAuth'
+import PersonSearchIcon from '@mui/icons-material/PersonSearch'
+import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useEvaluatorProfiles } from '@hooks/useEvaluatorProfiles'
 
 /**
  * Topbar — Barra superior de la aplicación.
  *
- * Muestra el nombre real del usuario autenticado (desde el store via useAuth)
- * y expone el botón de logout que limpia la sesión y redirige a /login.
+ * Muestra el perfil evaluador activo (no el usuario autenticado).
+ * Al hacer click navega a /perfiles para cambiar el perfil.
+ * El logout está en el Sidebar.
  */
 export default function Topbar() {
   const theme = useTheme()
-  const { user, logout, isLoading } = useAuth()
+  const navigate = useNavigate()
+  const { profiles, isLoading, fetchProfiles } = useEvaluatorProfiles()
 
-  // Inicial del nombre para el avatar generado localmente
-  const userInitial = user?.name ? user.name.charAt(0).toUpperCase() : '?'
+  // Cargar perfiles para encontrar el activo
+  useEffect(() => {
+    fetchProfiles()
+  }, [fetchProfiles])
+
+  const activeProfile = profiles.find((p) => p.isActive) ?? null
+  const initial = activeProfile?.fullName?.charAt(0).toUpperCase() ?? '?'
 
   return (
     <AppBar
@@ -39,72 +47,90 @@ export default function Topbar() {
         </Typography>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {/* Chip con datos del usuario autenticado */}
-          <Tooltip title={user?.email ?? 'Usuario'}>
-            <Button
-              id="topbar-user-menu"
-              variant="outlined"
-              color="inherit"
-              startIcon={
-                <Avatar
-                  alt={user?.name ?? 'Usuario'}
-                  sx={{
-                    width: 32,
-                    height: 32,
-                    bgcolor: theme.palette.primary.main,
-                    fontSize: 14,
-                    fontWeight: 700,
-                  }}
-                >
-                  {userInitial}
-                </Avatar>
-              }
-              sx={{
-                textTransform: 'none',
-                borderColor: theme.palette.secondary.main,
-                color: theme.palette.secondary.main,
-                '&:hover': {
-                  borderColor: theme.palette.primary.dark,
-                  backgroundColor: theme.palette.action.hover,
-                },
-              }}
-            >
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                <Typography variant="body1" fontWeight={600} lineHeight={1.2}>
-                  {user?.name ?? 'Usuario'}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" fontSize={11}>
-                  {user?.role ?? 'evaluator'}
-                </Typography>
-              </Box>
-            </Button>
-          </Tooltip>
-
-          {/* Botón de logout */}
-          <Tooltip title="Cerrar sesión">
+          {/* Chip del perfil evaluador activo */}
+          <Tooltip title={activeProfile ? 'Ir a perfiles evaluadores' : 'No hay perfil activo'}>
             <span>
-              <IconButton
-                id="topbar-logout-btn"
-                onClick={logout}
-                disabled={isLoading}
+              <Button
+                id="topbar-active-profile"
+                variant="outlined"
                 color="inherit"
-                aria-label="Cerrar sesión"
+                onClick={() => navigate('/perfiles')}
+                disabled={isLoading}
+                startIcon={
+                  isLoading ? (
+                    <CircularProgress size={22} color="inherit" />
+                  ) : (
+                    <Avatar
+                      alt={activeProfile?.fullName ?? 'Sin perfil'}
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        bgcolor: activeProfile
+                          ? theme.palette.success.light
+                          : theme.palette.action.disabled,
+                        fontSize: 14,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {isLoading ? null : initial}
+                    </Avatar>
+                  )
+                }
                 sx={{
-                  border: `1px solid ${theme.palette.secondary.main}`,
-                  borderRadius: 1,
+                  textTransform: 'none',
+                  borderColor: activeProfile
+                    ? theme.palette.success.light
+                    : theme.palette.secondary.main,
+                  color: theme.palette.secondary.main,
                   '&:hover': {
+                    borderColor: theme.palette.primary.dark,
                     backgroundColor: theme.palette.action.hover,
                   },
                 }}
               >
-                {isLoading ? (
-                  <CircularProgress size={20} color="inherit" />
-                ) : (
-                  <LogoutIcon fontSize="small" />
-                )}
-              </IconButton>
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                  {activeProfile && (
+                    <Typography
+                      sx={{
+                        fontSize: '8px',
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        color: theme.palette.success.light,
+                        lineHeight: 1,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Evaluador activo
+                    </Typography>
+                  )}
+                  <Typography variant="body1" fontWeight={600} lineHeight={1.2}>
+                    {isLoading
+                      ? 'Cargando...'
+                      : activeProfile?.fullName ?? 'Sin perfil activo'}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" fontSize={10} lineHeight={1}>
+                    {activeProfile ? activeProfile.archetype : 'Selecciona un perfil'}
+                  </Typography>
+                </Box>
+              </Button>
             </span>
           </Tooltip>
+
+          {/* Acceso rápido a perfiles si no hay ninguno activo */}
+          {!isLoading && !activeProfile && (
+            <Tooltip title="Seleccionar perfil evaluador">
+              <Button
+                variant="contained"
+                size="small"
+                color="primary"
+                startIcon={<PersonSearchIcon />}
+                onClick={() => navigate('/perfiles')}
+                sx={{ textTransform: 'none' }}
+              >
+                Seleccionar
+              </Button>
+            </Tooltip>
+          )}
         </Box>
       </Toolbar>
     </AppBar>

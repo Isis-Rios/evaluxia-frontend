@@ -106,7 +106,7 @@ export default function Sidebar() {
                   noWrap
                   sx={{ color: '#fff', marginLeft: 3, fontWeight: 700 }}
                 >
-                  ISIS R.
+                  {activeProfile?.name}
                 </Typography>
               )}
             </Box>
