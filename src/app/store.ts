@@ -5,15 +5,17 @@ import storage from 'redux-persist/lib/storage'
 import { persistReducer, persistStore } from 'redux-persist'
 
 import authReducer from '@features/auth/authSlice'
+import evaluatorProfilesReducer from '@features/evaluatorProfiles/evaluatorProfilesSlice'
 
 const persistConfig = {
   key: 'evaluxia-root',
   storage,
-  whitelist: ['auth'], // solo auth se persiste; otros slices futuros opt-in
+  whitelist: ['auth'], // solo auth se persiste; evaluatorProfiles se hidrata al iniciar sesión
 }
 
 const rootReducer = combineReducers({
   auth: authReducer,
+  evaluatorProfiles: evaluatorProfilesReducer,
 })
 
 const persistedReducer = persistReducer(persistConfig, rootReducer)

@@ -11,6 +11,9 @@ import PrivateRoute from './PrivateRoute'
 import UserEvaluatorProfilesPage from '@pages/UserEvaluatorProfiles/UserEvaluatorProfilesPage'
 import UserEvaluatorProfileFormPage from '@pages/UserEvaluatorProfiles/UserEvaluatorProfileFormPage'
 
+// Evaluations
+import EvaluateWebPage from '@pages/Evaluations/EvaluateWebPage'
+
 export default function AppRoutes() {
   return (
     <Routes>
@@ -25,10 +28,13 @@ export default function AppRoutes() {
         <Route path="/inicio" element={<HomePage />} />
         <Route path="/historial" element={<HistoryPage />} />
 
-        {/* Perfiles evaluadores — CRUD (sin vista de detalle) */}
+        {/* Perfiles evaluadores */}
         <Route path="/perfiles" element={<UserEvaluatorProfilesPage />} />
         <Route path="/perfiles/nuevo" element={<UserEvaluatorProfileFormPage />} />
         <Route path="/perfiles/:id/editar" element={<UserEvaluatorProfileFormPage />} />
+
+        {/* Evaluaciones */}
+        <Route path="/evaluate/web" element={<EvaluateWebPage />} />
       </Route>
 
       {/* Catch all */}

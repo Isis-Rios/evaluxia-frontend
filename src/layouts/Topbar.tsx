@@ -10,29 +10,24 @@ import {
   Typography,
   useTheme,
 } from '@mui/material'
-import PersonSearchIcon from '@mui/icons-material/PersonSearch'
-import { useEffect } from 'react'
+import { useSelector } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
-import { useEvaluatorProfiles } from '@hooks/useEvaluatorProfiles'
+import type { RootState } from '@app/store'
 
 /**
  * Topbar — Barra superior de la aplicación.
  *
- * Muestra el perfil evaluador activo (no el usuario autenticado).
- * Al hacer click navega a /perfiles para cambiar el perfil.
- * El logout está en el Sidebar.
+ * Lee el perfil evaluador activo directamente desde Redux (evaluatorProfiles.activeProfile),
+ * que se actualiza cada vez que useEvaluatorProfiles carga perfiles o activa uno.
+ * Sin fetches propios — reactivo y sin duplicidad (DRY, SRP).
  */
 export default function Topbar() {
   const theme = useTheme()
   const navigate = useNavigate()
-  const { profiles, isLoading, fetchProfiles } = useEvaluatorProfiles()
 
-  // Cargar perfiles para encontrar el activo
-  useEffect(() => {
-    fetchProfiles()
-  }, [fetchProfiles])
+  // Fuente única de verdad: Redux store
+  const activeProfile = useSelector((state: RootState) => state.evaluatorProfiles.activeProfile)
 
-  const activeProfile = profiles.find((p) => p.isActive) ?? null
   const initial = activeProfile?.fullName?.charAt(0).toUpperCase() ?? '?'
 
   return (
@@ -55,9 +50,8 @@ export default function Topbar() {
                 variant="outlined"
                 color="inherit"
                 onClick={() => navigate('/perfiles')}
-                disabled={isLoading}
                 startIcon={
-                  isLoading ? (
+                  activeProfile === undefined ? (
                     <CircularProgress size={22} color="inherit" />
                   ) : (
                     <Avatar
@@ -72,7 +66,7 @@ export default function Topbar() {
                         fontWeight: 700,
                       }}
                     >
-                      {isLoading ? null : initial}
+                      {initial}
                     </Avatar>
                   )
                 }
@@ -104,33 +98,15 @@ export default function Topbar() {
                     </Typography>
                   )}
                   <Typography variant="body1" fontWeight={600} lineHeight={1.2}>
-                    {isLoading
-                      ? 'Cargando...'
-                      : activeProfile?.fullName ?? 'Sin perfil activo'}
+                    {activeProfile?.fullName ?? 'Sin perfil activo'}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" fontSize={10} lineHeight={1}>
-                    {activeProfile ? activeProfile.archetype : 'Selecciona un perfil'}
+                    {activeProfile ? activeProfile.archetype : 'Selecciona un perfil aquí'}
                   </Typography>
                 </Box>
               </Button>
             </span>
           </Tooltip>
-
-          {/* Acceso rápido a perfiles si no hay ninguno activo */}
-          {!isLoading && !activeProfile && (
-            <Tooltip title="Seleccionar perfil evaluador">
-              <Button
-                variant="contained"
-                size="small"
-                color="primary"
-                startIcon={<PersonSearchIcon />}
-                onClick={() => navigate('/perfiles')}
-                sx={{ textTransform: 'none' }}
-              >
-                Seleccionar
-              </Button>
-            </Tooltip>
-          )}
         </Box>
       </Toolbar>
     </AppBar>
