@@ -23,19 +23,41 @@ export interface EvaluationMetrics {
   cumulativeCostUsd: number
 }
 
+export interface DomainMetrics {
+  evaluatedCount: number
+  passCount: number
+  failCount: number
+  notEvaluableCount: number
+  compliance: number | null
+  coverage: number
+}
+
 export interface Report {
   _id: string
   evaluationId: string
   title: string
   status: string
   summary?: string
-  overallScore?: number
+  overallScore?: number | null
+  nielsenCompliance?: number | null
+  wcagCompliance?: number | null
+  auditCoverage?: number
+  nielsenCoverage?: number
+  wcagCoverage?: number
+  passCount?: number
+  failCount?: number
+  notEvaluableCount?: number
   totalFindings: number
   criticalCount: number
   highCount: number
   mediumCount: number
   lowCount: number
   infoCount: number
+  evaluatedCriteria?: number
+  totalCriteria?: number
+  evidenceCount?: number
+  screenshotsCount?: number
+  iterationsEvaluated?: number
   metrics?: EvaluationMetrics
   generatedAt?: string
 }
@@ -89,6 +111,34 @@ export interface EvaluationResponse {
 
 // ─── Finding ──────────────────────────────────────────────────────────────
 
+export type FindingStatus = 'PASS' | 'FAIL' | 'NOT_EVALUABLE'
+export type FindingConfidence = 'high' | 'medium' | 'low'
+
+export interface TechnicalEvidenceItem {
+  type: string
+  property?: string
+  value?: string
+  selector?: string
+  attribute?: string
+  measurement?: string
+  context?: string
+  relatedValue?: {
+    property?: string
+    value?: string
+  }
+}
+
+export interface AffectedElement {
+  tag?: string
+  text?: string
+  selector?: string
+  role?: string
+  ariaLabel?: string
+  href?: string
+  id?: string
+  attributes?: Record<string, string>
+}
+
 export interface Finding {
   _id: string
   id: string
@@ -96,11 +146,20 @@ export interface Finding {
   iteration: number
   findingGroup: FindingGroup
   type?: string
+  status: FindingStatus
   severity: FindingSeverity
-  description: string
-  heuristic?: string
-  affectedArchetypeTraits?: string[]
+  confidence: FindingConfidence
+  heuristicCode?: string
+  heuristicName?: string
+  heuristic?: string // Legacy
   wcagCriterion?: string
+  description: string
+  evidence?: TechnicalEvidenceItem[]
+  affectedElement?: AffectedElement
+  impact?: string
+  recommendation?: string | null
+  screenshotUrl?: string
+  affectedArchetypeTraits?: string[]
   createdAt: string
   updatedAt: string
 }
