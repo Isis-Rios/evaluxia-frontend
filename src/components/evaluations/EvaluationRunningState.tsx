@@ -1,58 +1,28 @@
-import { Box, LinearProgress, Typography, Fade, Paper, Stack } from '@mui/material'
-import { useEffect, useState } from 'react'
+// src/components/evaluations/EvaluationRunningState.tsx
+import { Box, LinearProgress, Typography, Paper, Stack, Chip } from '@mui/material'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
+import PersonIcon from '@mui/icons-material/Person'
 import type { Evaluation } from '@/types/evaluation.types'
-
-const STEPS = [
-  'Iniciando simulación del navegador...',
-  'Evaluando accesibilidad y estructura...',
-  'Revisando experiencia de usuario cognitivo...',
-  'Ejecutando interacción sugerida...',
-  'Generando recomendaciones heurísticas...',
-  'Consolidando reporte Nielsen y WCAG...',
-]
 
 interface EvaluationRunningStateProps {
   evaluation?: Evaluation | null
 }
 
+/**
+ * EvaluationRunningState — Presenta la bitácora de navegación real en tiempo real (Live Observability).
+ * Consume directamente los datos de flowState entregados por la API REST sin utilizar textos estáticos simulados.
+ */
 export default function EvaluationRunningState({ evaluation }: EvaluationRunningStateProps) {
-  const [stepIndex, setStepIndex] = useState(0)
-  const [progress, setProgress] = useState(5)
-
-  // Ciclo decorativo de textos de carga
-  useEffect(() => {
-    const stepInterval = setInterval(() => {
-      setStepIndex((prev) => (prev + 1) % STEPS.length)
-    }, 4500)
-
-    return () => clearInterval(stepInterval)
-  }, [])
-
-  // Calcular progreso en base a la iteración actual (si max es 5)
-  useEffect(() => {
-    if (evaluation?.flowState) {
-      const currentStep = evaluation.flowState.currentStep || 1
-      const percent = Math.min(95, Math.round((currentStep / 5) * 100))
-      setProgress(percent)
-    } else {
-      // Progreso simulado inicial
-      const progressInterval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 25) return prev
-          return prev + 2
-        })
-      }, 500)
-      return () => clearInterval(progressInterval)
-    }
-  }, [evaluation])
-
   const previousActions = evaluation?.flowState?.previousActions || []
   const currentStep = evaluation?.flowState?.currentStep || 1
   const completedSteps = evaluation?.flowState?.completedSteps || []
+  const blockingError = evaluation?.flowState?.blockingError || null
+
+  // Calcular progreso aproximado en base a maxIterations (típicamente 4 u 8)
+  const percent = Math.min(95, Math.max(10, Math.round((currentStep / 5) * 100)))
 
   // Color de badge según acción
   const getActionColor = (actionType: string) => {
@@ -61,10 +31,14 @@ export default function EvaluationRunningState({ evaluation }: EvaluationRunning
         return '#0288d1'
       case 'TYPE':
         return '#2e7d32'
+      case 'SELECT':
+        return '#ed6c02'
       case 'NAVIGATE':
         return '#7b1fa2'
+      case 'STOP_FLOW':
+        return '#c62828'
       default:
-        return '#ed6c02'
+        return '#616161'
     }
   }
 
@@ -101,26 +75,25 @@ export default function EvaluationRunningState({ evaluation }: EvaluationRunning
         <AutoAwesomeIcon sx={{ color: '#fff', fontSize: 30 }} />
       </Box>
 
-      <Box sx={{ width: '100%', maxWidth: 500, textAlign: 'center' }}>
+      {/* Título de Estado Real */}
+      <Box sx={{ width: '100%', maxWidth: 550, textAlign: 'center' }}>
         <Typography variant="h6" fontWeight={800} gutterBottom sx={{ color: 'text.primary' }}>
           {evaluation?.status === 'completed' && evaluation?.auditStatus === 'running'
-            ? 'Fase 2: Generando Auditoría Especializada'
-            : 'Fase 1: Exploración en progreso'}
+            ? 'Fase 2: Ejecutando Auditoría Especializada de Dominio (Gemini)'
+            : `Fase 1: Exploración en Vivo — Iteración ${currentStep}`}
         </Typography>
 
-        <Fade key={stepIndex} in timeout={600}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, minHeight: 22 }}>
-            {evaluation?.status === 'completed' && evaluation?.auditStatus === 'running'
-              ? 'Analizando recorrido con Gemini (Nielsen 10 Heurísticas & WCAG 2.2)...'
-              : evaluation?.flowState
-              ? `Ejecutando iteración cognitiva ${currentStep} de 5...`
-              : STEPS[stepIndex]}
-          </Typography>
-        </Fade>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {evaluation?.status === 'completed' && evaluation?.auditStatus === 'running'
+            ? 'Analizando capturas y árbol ARIA con Gemini (Nielsen 10 & WCAG 2.2)...'
+            : previousActions.length > 0
+            ? `Última acción: ${previousActions[previousActions.length - 1].description}`
+            : 'Conectando sesión de Playwright en tiempo real...'}
+        </Typography>
 
         <LinearProgress
           variant="determinate"
-          value={progress}
+          value={percent}
           sx={{
             borderRadius: 4,
             height: 8,
@@ -132,28 +105,44 @@ export default function EvaluationRunningState({ evaluation }: EvaluationRunning
           }}
         />
         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', fontWeight: 600 }}>
-          {progress}% completado
+          {percent}% completado
         </Typography>
       </Box>
 
-      {/* Timeline de la simulación */}
-      {previousActions.length > 0 && (
-        <Paper
-          elevation={0}
-          sx={{
-            width: '100%',
-            maxWidth: 550,
-            p: 3,
-            border: '1px solid',
-            borderColor: 'divider',
-            borderRadius: 3,
-            bgcolor: 'background.paper',
-          }}
-        >
-          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2, color: 'text.primary' }}>
-            Historial de Acciones Simuladas ({previousActions.length})
+      {/* Muestra error de bloqueo si ocurrió */}
+      {blockingError && (
+        <Paper elevation={0} sx={{ p: 2, bgcolor: '#ffebee', border: '1px solid #ef5350', borderRadius: 2, maxWidth: 550, width: '100%' }}>
+          <Typography variant="subtitle2" fontWeight={800} color="error.dark">
+            ⚠️ Error de Navegación Interceptado
           </Typography>
+          <Typography variant="body2" color="error.main">
+            {blockingError}
+          </Typography>
+        </Paper>
+      )}
 
+      {/* Bitácora de Navegación en Tiempo Real */}
+      <Paper
+        elevation={0}
+        sx={{
+          width: '100%',
+          maxWidth: 550,
+          p: 3,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 3,
+          bgcolor: 'background.paper',
+        }}
+      >
+        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2, color: 'text.primary' }}>
+          📋 Bitácora de Navegación en Tiempo Real ({previousActions.length} acciones)
+        </Typography>
+
+        {previousActions.length === 0 ? (
+          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            Preparando exploración y conectando navegador en tiempo real...
+          </Typography>
+        ) : (
           <Stack spacing={2.5} sx={{ position: 'relative', pl: 1 }}>
             {previousActions.map((action, idx) => (
               <Box
@@ -185,23 +174,19 @@ export default function EvaluationRunningState({ evaluation }: EvaluationRunning
                 {/* Contenido de la acción */}
                 <Box sx={{ flexGrow: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                    <Typography
-                      variant="caption"
-                      fontWeight={700}
+                    <Chip
+                      label={action.actionType}
+                      size="small"
                       sx={{
-                        px: 1,
-                        py: 0.25,
-                        borderRadius: 1,
                         bgcolor: getActionColor(action.actionType),
                         color: '#fff',
-                        textTransform: 'uppercase',
+                        fontWeight: 800,
                         fontSize: 10,
+                        height: 20,
                       }}
-                    >
-                      {action.actionType}
-                    </Typography>
+                    />
                     <Typography variant="caption" color="text.secondary">
-                      Iteración {idx + 1} • {completedSteps[idx] || 'Exploración inicial'}
+                      Paso {idx + 1} • {completedSteps[idx] || 'Navegación'}
                     </Typography>
                   </Box>
                   <Typography variant="body2" sx={{ color: 'text.primary', fontSize: 13, lineHeight: 1.4 }}>
@@ -211,9 +196,9 @@ export default function EvaluationRunningState({ evaluation }: EvaluationRunning
               </Box>
             ))}
 
-            {/* Paso activo actual */}
-            {currentStep > previousActions.length && (
-              <Box sx={{ display: 'flex', gap: 2 }}>
+            {/* Paso activo en procesamiento */}
+            {evaluation?.status === 'running' && (
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                 <Box
                   sx={{
                     width: 22,
@@ -234,16 +219,14 @@ export default function EvaluationRunningState({ evaluation }: EvaluationRunning
                 >
                   <PlayArrowIcon sx={{ color: 'primary.main', fontSize: 14 }} />
                 </Box>
-                <Box sx={{ flexGrow: 1 }}>
-                  <Typography variant="body2" fontWeight={600} sx={{ color: 'primary.main', fontSize: 13 }}>
-                    Analizando y decidiendo siguiente paso...
-                  </Typography>
-                </Box>
+                <Typography variant="body2" fontWeight={600} sx={{ color: 'primary.main', fontSize: 13 }}>
+                  Analizando y decidiendo siguiente paso táctico...
+                </Typography>
               </Box>
             )}
           </Stack>
-        </Paper>
-      )}
+        )}
+      </Paper>
     </Box>
   )
 }

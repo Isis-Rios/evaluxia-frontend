@@ -22,6 +22,7 @@ import EvaluationForm from '@components/evaluations/EvaluationForm'
 import EvaluationRunningState from '@components/evaluations/EvaluationRunningState'
 import EvaluationSummary from '@components/evaluations/EvaluationSummary'
 import FindingsAccordion from '@components/evaluations/FindingsAccordion'
+import IterationTimeline from '@components/evaluations/IterationTimeline'
 import type { EvaluationFormValues } from '@components/evaluations/EvaluationForm'
 
 export default function EvaluateWebPage() {
@@ -47,7 +48,7 @@ export default function EvaluateWebPage() {
 
   // ── Findings & Report ──────────────────────────────────────────────────────
   const { findings, isLoading: findingsLoading, error: findingsError, fetchFindings } = useFindings()
-  const { report, fetchReportData } = useReport()
+  const { report, snapshots, fetchReportData } = useReport()
   const [showResults, setShowResults] = useState(false)
 
   // Cargar findings y report únicamente cuando la auditoría de Fase 2 (auditStatus) esté completed
@@ -151,6 +152,11 @@ export default function EvaluateWebPage() {
                 url={currentEvaluation?.url}
                 report={report}
               />
+
+              <Divider sx={{ my: 3 }} />
+
+              {/* Timeline Visual de la Simulación */}
+              <IterationTimeline snapshots={snapshots} />
 
               <Divider sx={{ my: 3 }} />
 
