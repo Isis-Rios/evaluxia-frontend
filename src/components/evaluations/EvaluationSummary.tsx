@@ -1,12 +1,18 @@
 // src/components/evaluations/EvaluationSummary.tsx
-import { Box, Chip, Divider, Typography, Grid, Paper } from '@mui/material'
-import type { FindingSummary, EvaluationMetrics } from '@/types/evaluation.types'
+import { Box, Chip, Divider, Typography, Grid, Paper, Card, CardContent } from '@mui/material'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
+import HighlightOffIcon from '@mui/icons-material/HighlightOff'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import SpeedIcon from '@mui/icons-material/Speed'
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser'
+import AssessmentIcon from '@mui/icons-material/Assessment'
+import type { FindingSummary, Report } from '@/types/evaluation.types'
 
 interface Props {
   summary: FindingSummary
   title?: string
   url?: string
-  metrics?: EvaluationMetrics
+  report?: Report | null
 }
 
 const SEVERITY_CONFIG = [
@@ -18,9 +24,11 @@ const SEVERITY_CONFIG = [
 ] as const
 
 /**
- * EvaluationSummary — Resumen ejecutivo de una evaluación con métricas de costo y tokens en tiempo real.
+ * EvaluationSummary — Resumen ejecutivo con métricas determinísticas (Score, Compliance, Cobertura) y panel de tokens.
  */
-export default function EvaluationSummary({ summary, title, url, metrics }: Props) {
+export default function EvaluationSummary({ summary, title, url, report }: Props) {
+  const metrics = report?.metrics
+
   return (
     <Box
       sx={{
@@ -52,22 +60,141 @@ export default function EvaluationSummary({ summary, title, url, metrics }: Prop
               </Typography>
             )}
           </Box>
-          <Divider sx={{ mb: 2 }} />
+          <Divider sx={{ mb: 2.5 }} />
         </>
       )}
 
-      {/* Total */}
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 2 }}>
-        <Typography variant="h3" fontWeight={800} color="primary">
-          {summary.total}
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          {summary.total === 1 ? 'hallazgo encontrado' : 'hallazgos encontrados'}
-        </Typography>
-      </Box>
+      {/* ── SECCIÓN 1: SCORE DETERMINÍSTICO Y CUMPLIMIENTO GLOBAL ── */}
+      {report && (
+        <Grid container spacing={2.5} sx={{ mb: 3 }}>
+          {/* Card 1: Overall Score */}
+          <Grid item xs={12} md={4}>
+            <Card
+              elevation={0}
+              sx={{
+                bgcolor: '#ffffff',
+                border: '1px solid #d1c4e9',
+                borderRadius: 2,
+                textAlign: 'center',
+                p: 2,
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ letterSpacing: 0.5 }}>
+                🏆 CALIFICACIÓN GLOBAL DETERMINÍSTICA
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, my: 1 }}>
+                <SpeedIcon color="primary" sx={{ fontSize: 36 }} />
+                <Typography variant="h3" fontWeight={900} color="primary.main">
+                  {report.overallScore !== null && report.overallScore !== undefined
+                    ? `${report.overallScore} / 100`
+                    : 'No evaluable'}
+                </Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                Calculado 100% en backend (Algoritmo Determinístico 3D)
+              </Typography>
+            </Card>
+          </Grid>
 
-      {/* Chips por severidad */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: metrics ? 3 : 0 }}>
+          {/* Card 2: Compliance por Dominio */}
+          <Grid item xs={12} md={4}>
+            <Card
+              elevation={0}
+              sx={{
+                bgcolor: '#ffffff',
+                border: '1px solid #c8e6c9',
+                borderRadius: 2,
+                p: 2,
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ letterSpacing: 0.5 }}>
+                🛡️ TASA DE CUMPLIMIENTO (COMPLIANCE)
+              </Typography>
+              <Box sx={{ mt: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" fontWeight={600} color="text.secondary">
+                    Nielsen Compliance:
+                  </Typography>
+                  <Typography variant="body2" fontWeight={800} color="success.dark">
+                    {report.nielsenCompliance !== null && report.nielsenCompliance !== undefined
+                      ? `${report.nielsenCompliance}%`
+                      : 'No evaluable'}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="body2" fontWeight={600} color="text.secondary">
+                    WCAG 2.2 Compliance:
+                  </Typography>
+                  <Typography variant="body2" fontWeight={800} color="primary.dark">
+                    {report.wcagCompliance !== null && report.wcagCompliance !== undefined
+                      ? `${report.wcagCompliance}%`
+                      : 'No evaluable'}
+                  </Typography>
+                </Box>
+              </Box>
+            </Card>
+          </Grid>
+
+          {/* Card 3: Cobertura de Auditoría */}
+          <Grid item xs={12} md={4}>
+            <Card
+              elevation={0}
+              sx={{
+                bgcolor: '#ffffff',
+                border: '1px solid #bbdefb',
+                borderRadius: 2,
+                p: 2,
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ letterSpacing: 0.5 }}>
+                📊 COBERTURA DE AUDITORÍA (COVERAGE)
+              </Typography>
+              <Box sx={{ mt: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" fontWeight={600} color="text.secondary">
+                    Cobertura Global:
+                  </Typography>
+                  <Typography variant="body2" fontWeight={800} color="info.main">
+                    {report.auditCoverage ?? 0}%
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="body2" fontWeight={600} color="text.secondary">
+                    Criterios Evaluados:
+                  </Typography>
+                  <Typography variant="body2" fontWeight={800} color="text.primary">
+                    {report.evaluatedCriteria ?? 0} / {report.totalCriteria ?? 20}
+                  </Typography>
+                </Box>
+              </Box>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* ── SECCIÓN 2: DESGLOSE DE CRITERIOS (PASS / FAIL / NOT_EVALUABLE) ── */}
+      {report && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 2.5, alignItems: 'center' }}>
+          <Chip
+            icon={<CheckCircleOutlineIcon sx={{ color: '#2e7d32 !important' }} />}
+            label={`PASS: ${report.passCount ?? 0}`}
+            sx={{ bgcolor: '#e8f5e9', color: '#2e7d32', fontWeight: 800, fontSize: 13, px: 1 }}
+          />
+          <Chip
+            icon={<HighlightOffIcon sx={{ color: '#d32f2f !important' }} />}
+            label={`FAIL: ${report.failCount ?? 0}`}
+            sx={{ bgcolor: '#ffebee', color: '#d32f2f', fontWeight: 800, fontSize: 13, px: 1 }}
+          />
+          <Chip
+            icon={<HelpOutlineIcon sx={{ color: '#757575 !important' }} />}
+            label={`NOT_EVALUABLE: ${report.notEvaluableCount ?? 0}`}
+            sx={{ bgcolor: '#f5f5f5', color: '#616161', fontWeight: 800, fontSize: 13, px: 1 }}
+          />
+        </Box>
+      )}
+
+      {/* ── SECCIÓN 3: CHIPS DE SEVERIDAD Y TRAZABILIDAD ── */}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: metrics ? 3 : 0, alignItems: 'center' }}>
         {SEVERITY_CONFIG.map(({ key, label, color, bg }) => {
           const count = summary[key]
           if (count === 0) return null
@@ -86,9 +213,15 @@ export default function EvaluationSummary({ summary, title, url, metrics }: Prop
             />
           )
         })}
+
+        {report && (
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto', fontWeight: 600 }}>
+            📸 Capturas: {report.screenshotsCount ?? 0} | ⚙️ Evidencias: {report.evidenceCount ?? 0} | 🔄 Iteraciones: {report.iterationsEvaluated ?? 1}
+          </Typography>
+        )}
       </Box>
 
-      {/* Panel de Métricas de Consumo de Tokens y Costos en Tiempo Real */}
+      {/* ── SECCIÓN 4: PANEL DE CONSUMO DE TOKENS Y COSTOS ── */}
       {metrics && (
         <Paper
           elevation={0}

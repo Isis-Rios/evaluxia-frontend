@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEvaluatorProfiles } from '@hooks/useEvaluatorProfiles'
 import { useEvaluations } from '@hooks/useEvaluations'
 import { useFindings } from '@hooks/useFindings'
+import { useReport } from '@hooks/useReport'
 import { buildFindingSummary } from '@/types/evaluation.types'
 
 import ActiveProfileCard from '@components/evaluations/ActiveProfileCard'
@@ -44,16 +45,20 @@ export default function EvaluateWebPage() {
     clearMessages,
   } = useEvaluations()
 
-  // ── Findings ──────────────────────────────────────────────────────────────
+  // ── Findings & Report ──────────────────────────────────────────────────────
   const { findings, isLoading: findingsLoading, error: findingsError, fetchFindings } = useFindings()
+  const { report, fetchReportData } = useReport()
   const [showResults, setShowResults] = useState(false)
 
-  // Cargar findings únicamente cuando la auditoría de Fase 2 (auditStatus) esté completed
+  // Cargar findings y report únicamente cuando la auditoría de Fase 2 (auditStatus) esté completed
   useEffect(() => {
     if (currentEvaluation?.auditStatus === 'completed' && currentEvaluation?._id) {
-      fetchFindings(currentEvaluation._id).then(() => setShowResults(true))
+      Promise.all([
+        fetchFindings(currentEvaluation._id),
+        fetchReportData(currentEvaluation._id),
+      ]).then(() => setShowResults(true))
     }
-  }, [currentEvaluation?.auditStatus, currentEvaluation?._id, fetchFindings])
+  }, [currentEvaluation?.auditStatus, currentEvaluation?._id, fetchFindings, fetchReportData])
 
   const handleSubmit = async (values: EvaluationFormValues) => {
     if (!activeProfile) return
@@ -144,6 +149,7 @@ export default function EvaluateWebPage() {
                 summary={summary}
                 title={currentEvaluation?.title}
                 url={currentEvaluation?.url}
+                report={report}
               />
 
               <Divider sx={{ my: 3 }} />
