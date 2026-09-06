@@ -19,7 +19,7 @@ import TouchAppIcon from '@mui/icons-material/TouchApp'
 import TitleIcon from '@mui/icons-material/Title'
 import SmartButtonIcon from '@mui/icons-material/SmartButton'
 import LinkIcon from '@mui/icons-material/Link'
-import ViewQuartersIcon from '@mui/icons-material/ViewQuarters'
+import DashboardIcon from '@mui/icons-material/Dashboard'
 import type { SnapshotEvidenceItem } from '@services/snapshots/snapshots.service'
 
 interface Props {
@@ -88,7 +88,7 @@ export default function IterationTimeline({ snapshots }: Props) {
       <CardContent sx={{ p: 3 }}>
         <Grid container spacing={3}>
           {/* Columna Izquierda: Captura de Pantalla Real */}
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Typography variant="caption" fontWeight={700} color="text.secondary" display="block" sx={{ mb: 1 }}>
               📸 CAPTURA DE PANTALLA (ITERACIÓN {currentSnapshot.iteration})
             </Typography>
@@ -132,7 +132,7 @@ export default function IterationTimeline({ snapshots }: Props) {
           </Grid>
 
           {/* Columna Derecha: Detalles Técnicos de la Iteración */}
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Box sx={{ mb: 2 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={700}>
                 URL VISITADA
@@ -193,7 +193,7 @@ export default function IterationTimeline({ snapshots }: Props) {
                 variant="outlined"
               />
               <Chip
-                icon={<ViewQuartersIcon fontSize="small" />}
+                icon={<DashboardIcon fontSize="small" />}
                 label={`Landmarks: ${currentSnapshot.landmarks?.length || 0}`}
                 size="small"
                 variant="outlined"

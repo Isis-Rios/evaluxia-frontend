@@ -1,5 +1,5 @@
 // src/hooks/useEvaluations.ts
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import axios from 'axios'
 import { evaluationService } from '@services/evaluations/evaluation.service'
 import type { Evaluation, CreateEvaluationDto } from '@/types/evaluation.types'
@@ -18,6 +18,39 @@ export interface UseEvaluationsReturn {
   clearMessages: () => void
 }
 
+function isAbortError(err: unknown): boolean {
+  return (
+    axios.isCancel(err) ||
+    (err instanceof DOMException && err.name === 'AbortError') ||
+    (err as { name?: string } | null)?.name === 'AbortError'
+  )
+}
+
+/**
+ * Resolves after `ms`, unless `signal` aborts first — in which case it
+ * rejects with an AbortError and clears its own timeout (no dangling timer).
+ */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+
+    const onAbort = () => {
+      clearTimeout(timeoutId)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export function useEvaluations(): UseEvaluationsReturn {
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [currentEvaluation, setCurrentEvaluation] = useState<Evaluation | null>(null)
@@ -26,6 +59,25 @@ export function useEvaluations(): UseEvaluationsReturn {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [total, setTotal] = useState(0)
+
+  // Guards against the polling loop (createEvaluation) updating state or
+  // scheduling further timers/requests after the owning component unmounts.
+  const isMountedRef = useRef(true)
+  const pollAbortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      // Stops the polling loop immediately: any pending sleep()/axios call
+      // rejects with AbortError instead of scheduling another iteration.
+      pollAbortControllerRef.current?.abort()
+    }
+  }, [])
+
+  const setIfMounted = useCallback((update: () => void) => {
+    if (isMountedRef.current) update()
+  }, [])
 
   const clearMessages = useCallback(() => {
     setError(null)
@@ -48,57 +100,76 @@ export function useEvaluations(): UseEvaluationsReturn {
 
   const createEvaluation = useCallback(
     async (dto: CreateEvaluationDto): Promise<Evaluation | null> => {
-      setIsCreating(true)
-      setCurrentEvaluation(null)
-      setError(null)
+      // Only one polling loop should ever be active: cancel any previous one
+      // (defensive — isCreating already disables re-submission from the UI).
+      pollAbortControllerRef.current?.abort()
+      const controller = new AbortController()
+      pollAbortControllerRef.current = controller
+
+      setIfMounted(() => {
+        setIsCreating(true)
+        setCurrentEvaluation(null)
+        setError(null)
+      })
+
       try {
-        const created = await evaluationService.create(dto)
-        setCurrentEvaluation(created)
-        setEvaluations((prev) => [created, ...prev])
-        setTotal((t) => t + 1)
+        const created = await evaluationService.create(dto, { signal: controller.signal })
+        setIfMounted(() => {
+          setCurrentEvaluation(created)
+          setEvaluations((prev) => [created, ...prev])
+          setTotal((t) => t + 1)
+        })
 
         const pollingIntervalMs = Number(import.meta.env.VITE_POLLING_INTERVAL_MS) || 2500
         let isDone = false
         let pollEvaluation = created
 
         while (!isDone) {
-          await new Promise((resolve) => setTimeout(resolve, pollingIntervalMs))
+          await sleep(pollingIntervalMs, controller.signal)
 
           try {
-            const updated = await evaluationService.getById(created._id)
+            const updated = await evaluationService.getById(created._id, { signal: controller.signal })
             pollEvaluation = updated
-            setCurrentEvaluation(updated)
-
-            setEvaluations((prev) =>
-              prev.map((e) => (e._id === updated._id ? updated : e))
-            )
+            setIfMounted(() => {
+              setCurrentEvaluation(updated)
+              setEvaluations((prev) => prev.map((e) => (e._id === updated._id ? updated : e)))
+            })
 
             if (updated.status === 'failed') {
               isDone = true
-              setError('La simulación de la evaluación ha fallado en el servidor.')
+              setIfMounted(() => setError('La simulación de la evaluación ha fallado en el servidor.'))
             } else if (updated.status === 'completed') {
               if (updated.auditStatus === 'completed') {
                 isDone = true
-                setSuccessMessage('Evaluación y auditoría de IA completadas con éxito.')
+                setIfMounted(() => setSuccessMessage('Evaluación y auditoría de IA completadas con éxito.'))
               } else if (updated.auditStatus === 'failed') {
                 isDone = true
-                setError('La exploración finalizó, pero la auditoría de IA de la Fase 2 falló.')
+                setIfMounted(() => setError('La exploración finalizó, pero la auditoría de IA de la Fase 2 falló.'))
               }
             }
           } catch (pollErr) {
+            // A cancelled poll (unmount, or a newer createEvaluation call)
+            // must actually stop the loop instead of being swallowed.
+            if (isAbortError(pollErr) || controller.signal.aborted) throw pollErr
             console.error('[useEvaluations] Error during polling:', pollErr)
           }
         }
 
         return pollEvaluation
       } catch (err) {
-        setError(normalizeError(err, 'No se pudo ejecutar la evaluación.'))
+        if (isAbortError(err)) {
+          // Polling was cancelled (unmount or superseded) — not a real error.
+          return null
+        }
+        setIfMounted(() => setError(normalizeError(err, 'No se pudo ejecutar la evaluación.')))
         return null
       } finally {
-        setIsCreating(false)
+        if (pollAbortControllerRef.current === controller) {
+          setIfMounted(() => setIsCreating(false))
+        }
       }
     },
-    [],
+    [setIfMounted],
   )
 
   return {

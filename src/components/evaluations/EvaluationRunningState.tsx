@@ -4,7 +4,6 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
-import PersonIcon from '@mui/icons-material/Person'
 import type { Evaluation } from '@/types/evaluation.types'
 
 interface EvaluationRunningStateProps {

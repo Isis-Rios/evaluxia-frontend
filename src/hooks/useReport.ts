@@ -1,7 +1,7 @@
 // src/hooks/useReport.ts
 import { useCallback, useState } from 'react'
 import { reportsService } from '@services/reports/reports.service'
-import { snapshotsService, SnapshotEvidenceItem } from '@services/snapshots/snapshots.service'
+import { snapshotsService, type SnapshotEvidenceItem } from '@services/snapshots/snapshots.service'
 import type { Report } from '@/types/evaluation.types'
 
 export function useReport() {

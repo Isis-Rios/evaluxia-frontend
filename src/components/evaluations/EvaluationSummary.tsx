@@ -1,11 +1,9 @@
 // src/components/evaluations/EvaluationSummary.tsx
-import { Box, Chip, Divider, Typography, Grid, Paper, Card, CardContent } from '@mui/material'
+import { Box, Chip, Divider, Typography, Grid, Paper, Card } from '@mui/material'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import HighlightOffIcon from '@mui/icons-material/HighlightOff'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import SpeedIcon from '@mui/icons-material/Speed'
-import VerifiedUserIcon from '@mui/icons-material/VerifiedUser'
-import AssessmentIcon from '@mui/icons-material/Assessment'
 import type { FindingSummary, Report } from '@/types/evaluation.types'
 
 interface Props {
@@ -68,7 +66,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
       {report && (
         <Grid container spacing={2.5} sx={{ mb: 3 }}>
           {/* Card 1: Overall Score */}
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Card
               elevation={0}
               sx={{
@@ -97,7 +95,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
           </Grid>
 
           {/* Card 2: Compliance por Dominio */}
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Card
               elevation={0}
               sx={{
@@ -136,7 +134,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
           </Grid>
 
           {/* Card 3: Cobertura de Auditoría */}
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Card
               elevation={0}
               sx={{
@@ -238,7 +236,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
           </Typography>
 
           <Grid container spacing={2}>
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <Typography variant="caption" sx={{ color: '#9fa8da', display: 'block' }}>
                 Modelo Configurado
               </Typography>
@@ -247,7 +245,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
               </Typography>
             </Grid>
 
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <Typography variant="caption" sx={{ color: '#9fa8da', display: 'block' }}>
                 Llamadas IA (F1 / F2)
               </Typography>
@@ -256,7 +254,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
               </Typography>
             </Grid>
 
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <Typography variant="caption" sx={{ color: '#9fa8da', display: 'block' }}>
                 Tokens (Input / Output)
               </Typography>
@@ -265,7 +263,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
               </Typography>
             </Grid>
 
-            <Grid item xs={6} sm={3}>
+            <Grid size={{ xs: 6, sm: 3 }}>
               <Typography variant="caption" sx={{ color: '#9fa8da', display: 'block' }}>
                 Tiempo Total
               </Typography>
@@ -274,11 +272,11 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
               </Typography>
             </Grid>
 
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <Divider sx={{ my: 1, borderColor: '#31255a' }} />
             </Grid>
 
-            <Grid item xs={6}>
+            <Grid size={{ xs: 6 }}>
               <Typography variant="caption" sx={{ color: '#9fa8da', display: 'block' }}>
                 Costo Estimado Evaluación
               </Typography>
@@ -287,7 +285,7 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
               </Typography>
             </Grid>
 
-            <Grid item xs={6}>
+            <Grid size={{ xs: 6 }}>
               <Typography variant="caption" sx={{ color: '#9fa8da', display: 'block' }}>
                 Costo Acumulado Backend
               </Typography>

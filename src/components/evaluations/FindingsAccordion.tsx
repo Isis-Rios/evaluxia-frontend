@@ -1,5 +1,5 @@
 // src/components/evaluations/FindingsAccordion.tsx
-import { useState } from 'react'
+import React, { useState } from 'react'
 import {
   Accordion,
   AccordionDetails,
@@ -7,8 +7,6 @@ import {
   Box,
   Chip,
   Collapse,
-  Divider,
-  IconButton,
   Link as MuiLink,
   Paper,
   Typography,
@@ -38,7 +36,7 @@ const SEVERITY_CONFIG: Record<
 
 const STATUS_CONFIG: Record<
   FindingStatus,
-  { label: string; color: string; bg: string; icon: JSX.Element }
+  { label: string; color: string; bg: string; icon: React.ReactElement }
 > = {
   PASS: {
     label: 'PASS',
