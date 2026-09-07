@@ -62,6 +62,26 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
         </>
       )}
 
+      {/* ── RESUMEN EJECUTIVO (IA) — Phase 2 executiveSummary, ya generado y persistido, antes sin consumidor ── */}
+      {report?.summary && (
+        <Box
+          sx={{
+            mb: 3,
+            p: 2,
+            bgcolor: '#ffffff',
+            border: '1px solid #d1c4e9',
+            borderRadius: 2,
+          }}
+        >
+          <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ letterSpacing: 0.5, display: 'block', mb: 1 }}>
+            🤖 RESUMEN EJECUTIVO (ANÁLISIS IA)
+          </Typography>
+          <Typography variant="body2" color="text.primary" sx={{ whiteSpace: 'pre-wrap' }}>
+            {report.summary}
+          </Typography>
+        </Box>
+      )}
+
       {/* ── SECCIÓN 1: SCORE DETERMINÍSTICO Y CUMPLIMIENTO GLOBAL ── */}
       {report && (
         <Grid container spacing={2.5} sx={{ mb: 3 }}>
