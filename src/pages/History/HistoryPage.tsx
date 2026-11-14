@@ -23,8 +23,10 @@ import HistoryIcon from '@mui/icons-material/History'
 import { useTheme } from '@mui/material/styles'
 import { useEvaluations } from '@hooks/useEvaluations'
 import { useFindings } from '@hooks/useFindings'
+import { useReport } from '@hooks/useReport'
 import FindingsAccordion from '@components/evaluations/FindingsAccordion'
 import EvaluationSummary from '@components/evaluations/EvaluationSummary'
+import IncompleteExplorationNotice from '@components/evaluations/IncompleteExplorationNotice'
 import { buildFindingSummary } from '@/types/evaluation.types'
 import type { Evaluation } from '@/types/evaluation.types'
 // ── Colores de estado ──────────────────────────────────────────────────────
@@ -38,11 +40,22 @@ const STATUS_CONFIG: Record<string, { label: string; color: 'default' | 'info' |
 function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
   const [open, setOpen] = useState(false)
   const { findings, isLoading, error, fetchFindings, clear } = useFindings()
+  // [Revisión MVP] La fila solo mostraba `findings` -- el score/compliance/
+  // cobertura/resumen de IA ya calculados y persistidos (Report) nunca se
+  // pedían aquí, así que esa información quedaba permanentemente
+  // inalcanzable en el Historial una vez terminada la sesión en vivo
+  // (EvaluateWebPage/EvaluatePrototypePage solo la muestran para la
+  // evaluación recién creada en esa misma sesión del hook).
+  const { report, fetchReportData } = useReport()
   const [loaded, setLoaded] = useState(false)
   const theme = useTheme()
+  const canHaveReport = evaluation.auditStatus === 'completed'
   const handleToggle = async () => {
     if (!open && !loaded) {
-      await fetchFindings(evaluation._id)
+      await Promise.all([
+        fetchFindings(evaluation._id),
+        canHaveReport ? fetchReportData(evaluation._id) : Promise.resolve(),
+      ])
       setLoaded(true)
     }
     if (open) clear()
@@ -66,19 +79,33 @@ function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
           </Button>
         </TableCell>
         <TableCell>
-          <Typography variant="body2" fontWeight={600}>{evaluation.title}</Typography>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            component="a"
-            href={evaluation.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            sx={{ textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
-          >
-            {evaluation.url}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" fontWeight={600}>{evaluation.title}</Typography>
+            <Chip
+              label={evaluation.type === 'prototype' ? 'Prototipo' : 'Sitio web'}
+              size="small"
+              variant="outlined"
+              sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+            />
+          </Box>
+          {evaluation.type === 'website' && evaluation.url ? (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              component="a"
+              href={evaluation.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              sx={{ textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+            >
+              {evaluation.url}
+            </Typography>
+          ) : (
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 320 }}>
+              {evaluation.description || 'Sin descripción'}
+            </Typography>
+          )}
         </TableCell>
         <TableCell>
           <Typography variant="body2" color="text.secondary">{date}</Typography>
@@ -107,7 +134,17 @@ function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
               {error && <Alert severity="error">{error}</Alert>}
               {!isLoading && loaded && (
                 <>
-                  <EvaluationSummary summary={summary} />
+                  {evaluation.status === 'completed' && (
+                    <IncompleteExplorationNotice
+                      blockingError={evaluation.flowState?.blockingError}
+                      terminationReason={evaluation.flowState?.terminationReason}
+                    />
+                  )}
+                  <EvaluationSummary
+                    summary={summary}
+                    report={report}
+                    evaluationType={evaluation.type === 'prototype' ? 'prototype' : 'website'}
+                  />
                   <Divider sx={{ my: 2 }} />
                   <FindingsAccordion findings={findings} />
                 </>
@@ -120,11 +157,31 @@ function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
   )
 }
 // ── Página ─────────────────────────────────────────────────────────────────
+const HISTORY_REFRESH_INTERVAL_MS = 5000
+
 export default function HistoryPage() {
   const { evaluations, isLoading, error, fetchEvaluations } = useEvaluations()
   useEffect(() => {
     fetchEvaluations(1, 50)
   }, [fetchEvaluations])
+
+  // [Revisión MVP] La lista se pedía una sola vez: si el usuario abre el
+  // Historial mientras una evaluación sigue 'pending'/'running', el chip de
+  // estado se quedaba congelado ahí aunque la evaluación ya hubiera
+  // terminado en el backend, hasta que el usuario recargara la página a
+  // mano. Mientras exista al menos una fila no-terminal, se refresca la
+  // lista en segundo plano a intervalos cortos; se detiene en cuanto todas
+  // las evaluaciones visibles llegan a un estado terminal.
+  const hasNonTerminalEvaluation = evaluations.some(
+    (ev) => ev.status === 'pending' || ev.status === 'running' || ev.auditStatus === 'running',
+  )
+  useEffect(() => {
+    if (!hasNonTerminalEvaluation) return
+    const intervalId = setInterval(() => {
+      fetchEvaluations(1, 50, { silent: true })
+    }, HISTORY_REFRESH_INTERVAL_MS)
+    return () => clearInterval(intervalId)
+  }, [hasNonTerminalEvaluation, fetchEvaluations])
   return (
     <Box>
       {/* ── Header ── */}

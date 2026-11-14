@@ -21,6 +21,7 @@ import {
   ArrowForward,
   CropOriginal,
   History,
+  Image as ImageIcon,
   Language,
 } from '@mui/icons-material'
 import { useTheme } from '@mui/material/styles'
@@ -69,8 +70,8 @@ export default function HomePage() {
       icon: <CropOriginal sx={{ fontSize: 36 }} />,
       title: 'Evaluar prototipo',
       description: 'Sube tus diseños y prototipos para que el agente los evalúe desde una perspectiva UX y accesibilidad.',
-      active: false,
-      action: () => {},
+      active: true,
+      action: () => navigate('/evaluate/prototype'),
     },
     {
       id: 'card-execute-flow',
@@ -268,12 +269,24 @@ export default function HomePage() {
                     variant="dot"
                     sx={{ '& .MuiBadge-badge': { width: 10, height: 10, borderRadius: '50%' } }}
                   >
-                    <Language sx={{ color: 'text.disabled', fontSize: 20 }} />
+                    {ev.type === 'prototype' ? (
+                      <ImageIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
+                    ) : (
+                      <Language sx={{ color: 'text.disabled', fontSize: 20 }} />
+                    )}
                   </Badge>
 
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Typography variant="body2" fontWeight={600} noWrap>{ev.title}</Typography>
-                    <Typography variant="caption" color="text.secondary" noWrap>{ev.url}</Typography>
+                    {/*
+                      [Revisión MVP] Antes siempre mostraba `ev.url`, que es
+                      `undefined` para prototipos (solo tienen `imageUrl`) --
+                      cada fila de prototipo aparecía con un ícono de sitio
+                      web y una leyenda en blanco.
+                    */}
+                    <Typography variant="caption" color="text.secondary" noWrap>
+                      {ev.type === 'prototype' ? (ev.description || 'Prototipo sin descripción') : ev.url}
+                    </Typography>
                   </Box>
 
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>

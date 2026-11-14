@@ -59,6 +59,13 @@ export interface Report {
   screenshotsCount?: number
   iterationsEvaluated?: number
   metrics?: EvaluationMetrics
+  /** Evaluación de prototipos — metadata de cobertura (K.2.1 §5). Ausente para evaluaciones WEB. */
+  coverage?: {
+    applicableCriteria: number
+    evaluatedCriteria: number
+    notEvaluableCriteria: number
+    outOfCoverageCriteria: number
+  }
   generatedAt?: string
 }
 
@@ -71,7 +78,10 @@ export interface Evaluation {
   title: string
   description?: string
   type: EvaluationType
-  url: string
+  /** Requerida únicamente cuando `type === 'website'`. */
+  url?: string
+  /** Presente únicamente cuando `type === 'prototype'` — ruta estática servida por el backend. */
+  imageUrl?: string
   status: EvaluationStatus
   auditStatus?: AuditStatus
   flowDefinition?: {
@@ -83,6 +93,12 @@ export interface Evaluation {
     completedSteps: string[]
     previousActions: Array<{ actionType: string; description: string; result: 'success' | 'failure' }>
     blockingError: string | null
+    /** P1.2/P1.2.2 (backend) — ausente en evaluaciones persistidas antes de ese cambio. */
+    terminationReason?: 'NATURAL_STOP' | 'MAX_ITERATIONS_REACHED' | 'ACTION_FAILED' | 'INVALID_ACTION_DECISION' | 'EXPLORATION_ERROR' | 'UNKNOWN'
+    snapshotIntegrity?: {
+      persistenceFailures: Array<{ iteration: number; error: string }>
+      lastActionVerifiedBySnapshot: boolean
+    }
   }
   createdAt: string
   updatedAt: string
@@ -94,6 +110,13 @@ export interface CreateEvaluationDto {
   type: EvaluationType
   url: string
   description?: string
+}
+
+export interface CreatePrototypeEvaluationDto {
+  evaluatorProfileId: string
+  title?: string
+  description: string
+  image: File
 }
 
 export interface EvaluationsListResponse {
@@ -126,7 +149,22 @@ export interface TechnicalEvidenceItem {
     property?: string
     value?: string
   }
+  /**
+   * [Revisión MVP] Faltaban en el tipo (aunque el backend ya los emite para
+   * `type: 'VISUAL_OBSERVATION'`, ver finding.model.ts) -- sin esto,
+   * FindingsAccordion no podía renderizarlos aunque quisiera. `elementDescription`
+   * es texto libre del elemento observado; `region` es contexto espacial, nunca
+   * identidad por sí solo.
+   */
+  elementDescription?: string
+  region?: VisualRegion
 }
+
+export type VisualRegion =
+  | 'top-left' | 'top-center' | 'top-right'
+  | 'middle-left' | 'center' | 'middle-right'
+  | 'bottom-left' | 'bottom-center' | 'bottom-right'
+  | 'full-screen'
 
 export interface AffectedElement {
   tag?: string
@@ -137,6 +175,11 @@ export interface AffectedElement {
   href?: string
   id?: string
   attributes?: Record<string, string>
+  /** Evaluación de prototipos — análogo de `selector` para una imagen estática. */
+  visualReference?: {
+    description?: string
+    region?: VisualRegion
+  }
 }
 
 export interface Finding {
@@ -181,14 +224,25 @@ export interface FindingSummary {
   info: number
 }
 
-/** Calcula el resumen de findings a partir de un array */
+/**
+ * Calcula el resumen de severidad a partir de un array de findings.
+ *
+ * [P1.5.2] Desde que el backend persiste también hallazgos `NOT_EVALUABLE`
+ * (antes solo existían `FAIL` en este array), este resumen se calcula
+ * exclusivamente sobre `status === 'FAIL'`: un `NOT_EVALUABLE` no es un
+ * defecto y no debe inflar ningún chip de severidad (ni siquiera "Info").
+ * Sigue apareciendo igualmente en `FindingsAccordion`, que no filtra por
+ * status -- este filtro es solo para el resumen de severidad.
+ */
 export function buildFindingSummary(findings: Finding[]): FindingSummary {
-  return findings.reduce<FindingSummary>(
-    (acc, f) => {
-      acc.total++
-      acc[f.severity]++
-      return acc
-    },
-    { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
-  )
+  return findings
+    .filter((f) => f.status === 'FAIL')
+    .reduce<FindingSummary>(
+      (acc, f) => {
+        acc.total++
+        acc[f.severity]++
+        return acc
+      },
+      { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+    )
 }

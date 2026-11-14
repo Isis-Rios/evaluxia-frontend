@@ -2,7 +2,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import axios from 'axios'
 import { evaluationService } from '@services/evaluations/evaluation.service'
-import type { Evaluation, CreateEvaluationDto } from '@/types/evaluation.types'
+import type { Evaluation, CreateEvaluationDto, CreatePrototypeEvaluationDto } from '@/types/evaluation.types'
 
 export interface UseEvaluationsReturn {
   evaluations: Evaluation[]
@@ -13,8 +13,9 @@ export interface UseEvaluationsReturn {
   successMessage: string | null
   total: number
 
-  fetchEvaluations: (page?: number, limit?: number) => Promise<void>
+  fetchEvaluations: (page?: number, limit?: number, options?: { silent?: boolean }) => Promise<void>
   createEvaluation: (dto: CreateEvaluationDto) => Promise<Evaluation | null>
+  createPrototypeEvaluation: (dto: CreatePrototypeEvaluationDto) => Promise<Evaluation | null>
   clearMessages: () => void
 }
 
@@ -84,22 +85,31 @@ export function useEvaluations(): UseEvaluationsReturn {
     setSuccessMessage(null)
   }, [])
 
-  const fetchEvaluations = useCallback(async (page = 1, limit = 20) => {
-    setIsLoading(true)
+  const fetchEvaluations = useCallback(async (page = 1, limit = 20, options?: { silent?: boolean }) => {
+    // `silent` (background auto-refresh, e.g. HistoryPage polling for a
+    // stale status chip) skips the isLoading toggle so it never flashes
+    // the full-page spinner over an already-rendered list.
+    if (!options?.silent) setIsLoading(true)
     setError(null)
     try {
       const response = await evaluationService.getAll(page, limit)
       setEvaluations(response.data)
       setTotal(response.total)
     } catch (err) {
-      setError(normalizeError(err, 'No se pudo cargar el historial de evaluaciones.'))
+      if (!options?.silent) setError(normalizeError(err, 'No se pudo cargar el historial de evaluaciones.'))
     } finally {
-      setIsLoading(false)
+      if (!options?.silent) setIsLoading(false)
     }
   }, [])
 
-  const createEvaluation = useCallback(
-    async (dto: CreateEvaluationDto): Promise<Evaluation | null> => {
+  /**
+   * Flujo compartido de creación + polling — WEB (`createEvaluation`) y
+   * PROTOTYPE (`createPrototypeEvaluation`) difieren únicamente en CÓMO se
+   * crea la evaluación (JSON vs multipart); el ciclo de polling posterior
+   * (mismos campos `status`/`auditStatus`, mismo backend) es IDÉNTICO.
+   */
+  const runCreationFlow = useCallback(
+    async (submit: (signal: AbortSignal) => Promise<Evaluation>): Promise<Evaluation | null> => {
       // Only one polling loop should ever be active: cancel any previous one
       // (defensive — isCreating already disables re-submission from the UI).
       pollAbortControllerRef.current?.abort()
@@ -113,7 +123,7 @@ export function useEvaluations(): UseEvaluationsReturn {
       })
 
       try {
-        const created = await evaluationService.create(dto, { signal: controller.signal })
+        const created = await submit(controller.signal)
         setIfMounted(() => {
           setCurrentEvaluation(created)
           setEvaluations((prev) => [created, ...prev])
@@ -123,6 +133,15 @@ export function useEvaluations(): UseEvaluationsReturn {
         const pollingIntervalMs = Number(import.meta.env.VITE_POLLING_INTERVAL_MS) || 2500
         let isDone = false
         let pollEvaluation = created
+        // [Revisión MVP] El backend corre su cola de trabajos en memoria
+        // (JobRunner, sin persistencia): si el servidor se reinicia o se
+        // cae mientras esta evaluación sigue 'running' y NO vuelve a
+        // arrancar (la reconciliación del backend solo corre al inicio),
+        // el documento se queda 'running' indefinidamente y este bucle
+        // sondearía para siempre sin ninguna señal de error visible. Un
+        // tope de tiempo evita un spinner infinito incluso en ese caso.
+        const pollStartedAt = Date.now()
+        const MAX_POLLING_MS = 10 * 60 * 1000
 
         while (!isDone) {
           await sleep(pollingIntervalMs, controller.signal)
@@ -146,6 +165,14 @@ export function useEvaluations(): UseEvaluationsReturn {
                 isDone = true
                 setIfMounted(() => setError('La exploración finalizó, pero la auditoría de IA de la Fase 2 falló.'))
               }
+            } else if (Date.now() - pollStartedAt > MAX_POLLING_MS) {
+              isDone = true
+              setIfMounted(() =>
+                setError(
+                  'La evaluación está tardando más de lo esperado y dejamos de esperar en esta pantalla. ' +
+                    'Puedes revisar su estado más tarde en el Historial.',
+                ),
+              )
             }
           } catch (pollErr) {
             // A cancelled poll (unmount, or a newer createEvaluation call)
@@ -172,6 +199,18 @@ export function useEvaluations(): UseEvaluationsReturn {
     [setIfMounted],
   )
 
+  const createEvaluation = useCallback(
+    (dto: CreateEvaluationDto): Promise<Evaluation | null> =>
+      runCreationFlow((signal) => evaluationService.create(dto, { signal })),
+    [runCreationFlow],
+  )
+
+  const createPrototypeEvaluation = useCallback(
+    (dto: CreatePrototypeEvaluationDto): Promise<Evaluation | null> =>
+      runCreationFlow((signal) => evaluationService.createPrototype(dto, { signal })),
+    [runCreationFlow],
+  )
+
   return {
     evaluations,
     currentEvaluation,
@@ -182,6 +221,7 @@ export function useEvaluations(): UseEvaluationsReturn {
     total,
     fetchEvaluations,
     createEvaluation,
+    createPrototypeEvaluation,
     clearMessages,
   }
 }

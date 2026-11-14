@@ -22,6 +22,7 @@ import EvaluationForm from '@components/evaluations/EvaluationForm'
 import EvaluationRunningState from '@components/evaluations/EvaluationRunningState'
 import EvaluationSummary from '@components/evaluations/EvaluationSummary'
 import FindingsAccordion from '@components/evaluations/FindingsAccordion'
+import IncompleteExplorationNotice from '@components/evaluations/IncompleteExplorationNotice'
 import IterationTimeline from '@components/evaluations/IterationTimeline'
 import type { EvaluationFormValues } from '@components/evaluations/EvaluationForm'
 
@@ -142,6 +143,11 @@ export default function EvaluateWebPage() {
           {/* Resultados */}
           {showResults && !isCreating && (
             <Box>
+              <IncompleteExplorationNotice
+                blockingError={currentEvaluation?.flowState?.blockingError}
+                terminationReason={currentEvaluation?.flowState?.terminationReason}
+              />
+
               {/* Resumen */}
               <Typography variant="subtitle1" fontWeight={700} gutterBottom>
                 Resumen ejecutivo

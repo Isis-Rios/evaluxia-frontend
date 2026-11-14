@@ -11,6 +11,14 @@ interface Props {
   title?: string
   url?: string
   report?: Report | null
+  /**
+   * P7.2 — distingue prototype de website SOLO para ajustar la
+   * presentación de `overallScore`/cobertura (nunca para cambiar datos o
+   * fórmulas). Omitido (o 'website'): comportamiento 100% idéntico al
+   * existente, byte-for-byte — ningún caller actual (EvaluateWebPage,
+   * HistoryPage) lo pasa.
+   */
+  evaluationType?: 'website' | 'prototype'
 }
 
 const SEVERITY_CONFIG = [
@@ -24,8 +32,10 @@ const SEVERITY_CONFIG = [
 /**
  * EvaluationSummary — Resumen ejecutivo con métricas determinísticas (Score, Compliance, Cobertura) y panel de tokens.
  */
-export default function EvaluationSummary({ summary, title, url, report }: Props) {
+export default function EvaluationSummary({ summary, title, url, report, evaluationType }: Props) {
   const metrics = report?.metrics
+  const isPrototype = evaluationType === 'prototype'
+  const coverage = report?.coverage
 
   return (
     <Box
@@ -109,7 +119,11 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
                 </Typography>
               </Box>
               <Typography variant="caption" color="text.secondary">
-                Calculado 100% en backend (Algoritmo Determinístico 3D)
+                {isPrototype
+                  ? coverage
+                    ? `Calculado sobre ${coverage.evaluatedCriteria} de ${coverage.applicableCriteria} criterios aplicables evaluados`
+                    : 'Cobertura no disponible para este reporte'
+                  : 'Calculado 100% en backend (Algoritmo Determinístico 3D)'}
               </Typography>
             </Card>
           </Grid>
@@ -167,24 +181,51 @@ export default function EvaluationSummary({ summary, title, url, report }: Props
               <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ letterSpacing: 0.5 }}>
                 📊 COBERTURA DE AUDITORÍA (COVERAGE)
               </Typography>
-              <Box sx={{ mt: 1 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                  <Typography variant="body2" fontWeight={600} color="text.secondary">
-                    Cobertura Global:
+              {isPrototype ? (
+                coverage ? (
+                  <Box sx={{ mt: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                      <Typography variant="body2" fontWeight={600} color="text.secondary">
+                        Criterios evaluados:
+                      </Typography>
+                      <Typography variant="body2" fontWeight={800} color="info.main">
+                        {coverage.evaluatedCriteria} / {coverage.applicableCriteria}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="body2" fontWeight={600} color="text.secondary">
+                        Fuera del alcance visual:
+                      </Typography>
+                      <Typography variant="body2" fontWeight={800} color="text.primary">
+                        {coverage.outOfCoverageCriteria}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    No disponible para este reporte
                   </Typography>
-                  <Typography variant="body2" fontWeight={800} color="info.main">
-                    {report.auditCoverage ?? 0}%
-                  </Typography>
+                )
+              ) : (
+                <Box sx={{ mt: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                    <Typography variant="body2" fontWeight={600} color="text.secondary">
+                      Cobertura Global:
+                    </Typography>
+                    <Typography variant="body2" fontWeight={800} color="info.main">
+                      {report.auditCoverage ?? 0}%
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" fontWeight={600} color="text.secondary">
+                      Criterios Evaluados:
+                    </Typography>
+                    <Typography variant="body2" fontWeight={800} color="text.primary">
+                      {report.evaluatedCriteria ?? 0} / {report.totalCriteria ?? 20}
+                    </Typography>
+                  </Box>
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography variant="body2" fontWeight={600} color="text.secondary">
-                    Criterios Evaluados:
-                  </Typography>
-                  <Typography variant="body2" fontWeight={800} color="text.primary">
-                    {report.evaluatedCriteria ?? 0} / {report.totalCriteria ?? 20}
-                  </Typography>
-                </Box>
-              </Box>
+              )}
             </Card>
           </Grid>
         </Grid>

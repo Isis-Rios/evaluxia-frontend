@@ -167,4 +167,44 @@ describe('useEvaluations polling lifecycle', () => {
 
     expect(mockedService.getById).toHaveBeenCalledTimes(callsAtUnmount)
   })
+
+  it('[Revisión MVP] stops polling and surfaces an error after 10 minutes if the evaluation never reaches a final state', async () => {
+    // Reproduces the scenario where the backend's in-memory JobRunner loses
+    // an in-flight evaluation (process restart/crash) and nothing ever
+    // flips its status away from 'running' -- without a client-side cap,
+    // this loop would poll forever with no visible error.
+    const created = makeEvaluation({ status: 'pending' })
+    mockedService.create.mockResolvedValue(created)
+    mockedService.getById.mockResolvedValue(makeEvaluation({ status: 'running' }))
+
+    const { result } = renderHook(() => useEvaluations())
+
+    let createPromise!: Promise<Evaluation | null>
+    await act(async () => {
+      createPromise = result.current.createEvaluation(createDto)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    // Advance just under 10 minutes: still polling, no error yet.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9 * 60 * 1000)
+    })
+    expect(result.current.isCreating).toBe(true)
+    expect(result.current.error).toBeNull()
+
+    // Cross the 10-minute mark: the loop must stop on its own.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000)
+    })
+    await createPromise
+
+    expect(result.current.isCreating).toBe(false)
+    expect(result.current.error).toContain('Historial')
+
+    const callsAtTimeout = mockedService.getById.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5)
+    })
+    expect(mockedService.getById).toHaveBeenCalledTimes(callsAtTimeout)
+  })
 })

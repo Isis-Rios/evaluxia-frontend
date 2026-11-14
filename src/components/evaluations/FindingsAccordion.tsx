@@ -70,10 +70,20 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
  */
 export default function FindingsAccordion({ findings }: Props) {
   const [openEvidenceId, setOpenEvidenceId] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'FAIL' | 'NOT_EVALUABLE' | 'PASS'>('ALL')
 
   const toggleEvidence = (id: string) => {
     setOpenEvidenceId((prev) => (prev === id ? null : id))
   }
+
+  const failCount = findings.filter((f) => (f.status || 'FAIL') === 'FAIL').length
+  const notEvalCount = findings.filter((f) => f.status === 'NOT_EVALUABLE').length
+  const passCount = findings.filter((f) => f.status === 'PASS').length
+
+  const filteredFindings =
+    statusFilter === 'ALL'
+      ? findings
+      : findings.filter((f) => (f.status || 'FAIL') === statusFilter)
 
   if (findings.length === 0) {
     return (
@@ -85,7 +95,62 @@ export default function FindingsAccordion({ findings }: Props) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-      {findings.map((finding, idx) => {
+      {/* ── BARRA DE FILTROS POR ESTADO (Todos / FAIL / NOT_EVALUABLE / PASS) ── */}
+      <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Chip
+          label={`Todos (${findings.length})`}
+          clickable
+          color={statusFilter === 'ALL' ? 'primary' : 'default'}
+          variant={statusFilter === 'ALL' ? 'filled' : 'outlined'}
+          onClick={() => setStatusFilter('ALL')}
+          sx={{ fontWeight: 700 }}
+        />
+        <Chip
+          icon={<HighlightOffIcon sx={{ color: statusFilter === 'FAIL' ? '#ffffff !important' : '#d32f2f !important' }} />}
+          label={`FAIL (${failCount})`}
+          clickable
+          onClick={() => setStatusFilter('FAIL')}
+          sx={{
+            fontWeight: 700,
+            bgcolor: statusFilter === 'FAIL' ? '#d32f2f' : '#ffebee',
+            color: statusFilter === 'FAIL' ? '#ffffff' : '#d32f2f',
+            border: '1px solid #d32f2f',
+          }}
+        />
+        <Chip
+          icon={<HelpOutlineIcon sx={{ color: statusFilter === 'NOT_EVALUABLE' ? '#ffffff !important' : '#616161 !important' }} />}
+          label={`NOT_EVALUABLE (${notEvalCount})`}
+          clickable
+          onClick={() => setStatusFilter('NOT_EVALUABLE')}
+          sx={{
+            fontWeight: 700,
+            bgcolor: statusFilter === 'NOT_EVALUABLE' ? '#616161' : '#f5f5f5',
+            color: statusFilter === 'NOT_EVALUABLE' ? '#ffffff' : '#616161',
+            border: '1px solid #616161',
+          }}
+        />
+        <Chip
+          icon={<CheckCircleOutlineIcon sx={{ color: statusFilter === 'PASS' ? '#ffffff !important' : '#2e7d32 !important' }} />}
+          label={`PASS (${passCount})`}
+          clickable
+          onClick={() => setStatusFilter('PASS')}
+          sx={{
+            fontWeight: 700,
+            bgcolor: statusFilter === 'PASS' ? '#2e7d32' : '#e8f5e9',
+            color: statusFilter === 'PASS' ? '#ffffff' : '#2e7d32',
+            border: '1px solid #2e7d32',
+          }}
+        />
+      </Box>
+
+      {filteredFindings.length === 0 ? (
+        <Paper elevation={0} sx={{ p: 3, textAlign: 'center', bgcolor: '#f9f9f9', border: '1px dashed #ccc', borderRadius: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            No se encontraron hallazgos con estado <strong>{statusFilter}</strong> en esta evaluación.
+          </Typography>
+        </Paper>
+      ) : (
+        filteredFindings.map((finding, idx) => {
         const findingId = finding._id || finding.id || `f-${idx}`
         const sev = SEVERITY_CONFIG[finding.severity] || SEVERITY_CONFIG.info
         const st = STATUS_CONFIG[finding.status] || STATUS_CONFIG.FAIL
@@ -177,7 +242,7 @@ export default function FindingsAccordion({ findings }: Props) {
                 {finding.description}
               </Typography>
 
-              {/* Elemento afectado */}
+              {/* Elemento afectado (WEB) */}
               {finding.affectedElement?.selector && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
                   <CodeIcon fontSize="small" color="action" />
@@ -186,6 +251,18 @@ export default function FindingsAccordion({ findings }: Props) {
                   </Typography>
                 </Box>
               )}
+
+              {/* Elemento afectado (PROTOTYPE) — descripción + región visual, nunca un selector inventado */}
+              {finding.affectedElement?.visualReference &&
+                (finding.affectedElement.visualReference.description || finding.affectedElement.visualReference.region) && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <CodeIcon fontSize="small" color="action" />
+                    <Typography variant="caption" sx={{ fontFamily: 'monospace', bgcolor: '#f5f5f5', p: 0.5, borderRadius: 1 }}>
+                      Elemento: {finding.affectedElement.visualReference.description || 'sin descripción'}
+                      {finding.affectedElement.visualReference.region ? ` · región: ${finding.affectedElement.visualReference.region}` : ''}
+                    </Typography>
+                  </Box>
+                )}
 
               {/* Recomendación accionable REAL */}
               {finding.recommendation && (
@@ -237,6 +314,28 @@ export default function FindingsAccordion({ findings }: Props) {
                               Selector: {item.selector}
                             </Typography>
                           )}
+                          {/*
+                            [Revisión MVP] elementDescription/region/context ya
+                            llegaban en el objeto (backend finding.model.ts)
+                            pero nunca se renderizaban -- para evidencia
+                            `VISUAL_OBSERVATION` (prototipos) esto es a menudo
+                            la ÚNICA información legible (el prompt instruye
+                            explícitamente a Gemini a citar solo context/
+                            elementDescription cuando ninguna property de la
+                            whitelist representa fielmente lo observado), así
+                            que el panel aparecía vacío aunque hasEvidence
+                            fuera true.
+                          */}
+                          {item.elementDescription && (
+                            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                              Elemento: {item.elementDescription}
+                            </Typography>
+                          )}
+                          {item.region && (
+                            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                              Región: {item.region}
+                            </Typography>
+                          )}
                           {item.property && (
                             <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                               Property: {item.property}
@@ -245,6 +344,11 @@ export default function FindingsAccordion({ findings }: Props) {
                           {item.value && (
                             <Typography variant="caption" fontWeight={600} sx={{ ml: 1, color: '#333' }}>
                               Value: {item.value}
+                            </Typography>
+                          )}
+                          {item.context && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', ml: 1, mt: 0.25, fontStyle: 'italic' }}>
+                              {item.context}
                             </Typography>
                           )}
                         </Box>
@@ -277,7 +381,7 @@ export default function FindingsAccordion({ findings }: Props) {
             </AccordionDetails>
           </Accordion>
         )
-      })}
+      }))}
     </Box>
   )
 }

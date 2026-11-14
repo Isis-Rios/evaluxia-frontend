@@ -5,6 +5,7 @@ import type {
   EvaluationsListResponse,
   EvaluationResponse,
   CreateEvaluationDto,
+  CreatePrototypeEvaluationDto,
 } from '@/types/evaluation.types'
 
 const BASE_URL = '/api/v1/evaluations'
@@ -34,6 +35,21 @@ class EvaluationService {
   async create(dto: CreateEvaluationDto, options?: RequestOptions): Promise<Evaluation> {
     const { data } = await apiClient.post<EvaluationResponse>(BASE_URL, dto, {
       signal: options?.signal,
+    })
+    return data.data
+  }
+
+  /** POST /api/v1/evaluations/prototype — multipart/form-data (imagen + campos de texto). */
+  async createPrototype(dto: CreatePrototypeEvaluationDto, options?: RequestOptions): Promise<Evaluation> {
+    const formData = new FormData()
+    formData.append('evaluatorProfileId', dto.evaluatorProfileId)
+    if (dto.title) formData.append('title', dto.title)
+    formData.append('description', dto.description)
+    formData.append('image', dto.image)
+
+    const { data } = await apiClient.post<EvaluationResponse>(`${BASE_URL}/prototype`, formData, {
+      signal: options?.signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
     return data.data
   }
