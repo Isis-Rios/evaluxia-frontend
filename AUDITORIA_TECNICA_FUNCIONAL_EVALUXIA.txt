@@ -1,0 +1,508 @@
+# AUDITORÍA TÉCNICA Y FUNCIONAL DE EVALUXIA
+
+**Fecha de auditoría:** 2026-09-15
+**Repositorios auditados:**
+- Frontend: `evaluxia` (React 19 + TypeScript + Vite) — `/Users/isisrios/Proyectos/React/evaluxia`, rama `feature/structure`
+- Backend: `evaluxia_backend` (Node.js + Express 5 + TypeScript + MongoDB) — `/Users/isisrios/Proyectos/Node/evaluxia_backend`, rama `feature/v2-architecture-optimizations` (3 commits por delante de `origin`, más 8 archivos modificados y varios módulos nuevos sin commitear)
+**Documento académico de referencia:** `Proyecto aplicado de grado - EVALUXIA - ISIS RIOS (12).pdf` (versión más reciente disponible, 13/09/2026, 41 páginas)
+
+**Método:** lectura directa de ambos repositorios (estructura, código, tests, configuración, `git log`/`git diff`), sin modificar ningún archivo. Toda afirmación cita una ruta de archivo. Se distingue explícitamente entre código **implementado y funcional**, **parcialmente implementado**, **placeholder/deshabilitado**, **no encontrado** y **no determinable con la evidencia disponible**.
+
+> **Nota sobre el estado del working tree del backend:** al momento de esta auditoría existen 8 archivos modificados sin commitear (`gemini.client.ts`, `ai.service.ts`, `automation.service.ts`, `evaluation.service.ts`, `audit-engine.service.ts`, `evidence-gate.service.ts`, `snapshot-evidence.model.ts`, `metrics-tracker.ts`) y varios módulos **nuevos** sin trackear (`evidence-deduplication.service.ts`, `evidence-prioritization.service.ts`, `evidence-traceability.service.ts`, la carpeta `fixtures/`, la carpeta `src/shared/testing/` con ~50 archivos, y nuevos tests de regresión). Este informe describe el **estado real del disco** (comportamiento actual del sistema), señalando explícitamente qué parte de lo descrito todavía no forma parte de ningún commit del historial.
+
+---
+
+## 1. Resumen ejecutivo
+
+EvalUXIA es un **MVP avanzado en desarrollo activo**, no un producto terminado. Su funcionalidad más madura —evaluación automática de sitios web públicos por URL, con navegación real vía Playwright, decisión híbrida reglas/IA, análisis determinístico y por Gemini contra heurísticas de Nielsen y criterios WCAG 2.2, y generación de hallazgos con un mecanismo anti-alucinación ("Evidence Gate")— está **funcionalmente implementada de extremo a extremo** (creación → navegación → análisis → hallazgos → visualización), pero el propio código evidencia un ciclo de **estabilización activo y no terminado**: instrumentación de diagnóstico temporal todavía presente, un incidente real de payload de ~5.4MB corregido apenas días antes de esta auditoría, y trabajo nuevo (deduplicación/priorización/trazabilidad de evidencia) aún sin commitear.
+
+La evaluación de **prototipos por imagen** —el segundo pilar declarado en el documento académico— **no existe como funcionalidad**: solo hay un valor de enum reservado (`'prototype'`) en el esquema de datos y una tarjeta deshabilitada en el frontend ("Próximamente"); no hay endpoint de carga de archivos, ni integración multimodal con Gemini, ni pipeline de análisis visual.
+
+Las **pruebas de usabilidad con usuarios reales (SUS)**, planteadas en el documento académico como Actividad 7 (01/09–21/09/2026, es decir, en curso a la fecha de esta auditoría), **no tienen ningún rastro en el código** de ninguno de los dos repositorios. Lo que el código muestra ocurriendo *ahora mismo* no es validación con usuarios sino continuación del hardening técnico del motor de evaluación (Actividades 3–5 del cronograma original), es decir, el proyecto va técnicamente **detrás** de su cronograma declarado en la fase final, aunque **al día o adelantado** en las fases iniciales (el frontend inició en febrero, dos meses antes de la fecha planteada).
+
+Fortalezas técnicas reales verificadas: protección SSRF robusta y re-verificada en cada request de red (no solo en el DTO de entrada), separación real entre decisión determinística y decisión por IA con costo de tokens cero cuando aplica, un score final 100% calculado por el backend (no delegado a la IA), reintentos con backoff exponencial y clasificación de errores de Gemini, y una batería de 61 scripts de prueba organizados en fases (T, D, E, F, G, H, J) que documentan explícitamente qué brecha de robustez cierra cada uno.
+
+Limitaciones estructurales reales: el "job runner" es un singleton en memoria sin ninguna recuperación tras un reinicio del proceso (una evaluación en curso se pierde por completo), no existe framework de testing (son 61 scripts manuales de `ts-node`, de los cuales solo 1 está cableado a `npm test`), no hay CI/CD en ningún repositorio, y la cobertura de pruebas del frontend es mínima (2 archivos de test en todo el proyecto).
+
+---
+
+## 2. Descripción actual del producto
+
+EvalUXIA es una plataforma cliente-servidor desacoplada compuesta por un frontend React que consume una API REST de un backend Node/Express, el cual orquesta un pipeline de evaluación asíncrono de dos fases: exploración automatizada de un sitio web (Playwright + reglas determinísticas + Gemini como "piloto" de navegación) y auditoría especializada posterior (análisis determinístico + Gemini contra heurísticas UX/WCAG), con persistencia completa en MongoDB y un mecanismo propio anti-alucinación para depurar los hallazgos antes de mostrarlos.
+
+Hoy, en la práctica, el sistema permite: iniciar sesión, crear/gestionar "perfiles evaluadores" (contexto de un usuario tipo ficticio), lanzar una evaluación de una URL pública, observar en tiempo real (vía *polling*) la navegación simulada, y consultar al finalizar un reporte con score, cumplimiento por dominio (Nielsen/WCAG), hallazgos con evidencia (capturas, selectores), recomendaciones, y un panel de consumo de tokens/costo de IA. No permite evaluar prototipos por imagen, ni ejecutar pruebas de usabilidad con usuarios, ni tiene mecanismo de recuperación si el proceso backend se reinicia a mitad de una evaluación.
+
+---
+
+## 3. Arquitectura real
+
+### 3.1 Componentes y su rol
+
+- **Frontend (React 19 + TS + Vite)** — `src/pages/**` → `src/hooks/*.ts` → `src/services/**/*.service.ts` (clases singleton) → `src/services/api/apiClient.ts` (axios). Sin lógica de negocio: el score y las métricas llegan ya calculados desde el backend (comentario explícito "calculado 100% en backend" en `src/components/evaluations/EvaluationSummary.tsx`). Gestión de sesión con Redux Toolkit + redux-persist; formularios con react-hook-form + Yup; UI 100% MUI v7 (Tailwind está configurado pero **no tiene un solo uso de `className` en todo el proyecto** — es una dependencia inerte, no una tecnología de UI activa como sugiere la documentación previa).
+- **Backend (Node/Express 5)** — expone `/api/v1` (26 endpoints de negocio + `/health`). El patrón `controller → service → repository → model` es **mayoritario pero no uniforme**: el módulo `reports` no tiene controller (handlers inline en `src/modules/reports/reports.routes.ts`); `automation` y `ai` combinan controlador y rutas en el mismo archivo; `ai-interactions` no tiene capa HTTP (solo uso interno).
+- **Playwright (Chromium headless)** — un único proceso de navegador compartido (`src/infrastructure/playwright/browser.manager.ts`), sesiones aisladas por evaluación (`BrowserContext`+`Page` por `evaluationId`, `src/modules/automation/automation.service.ts`). Extrae snapshots estructurados del DOM y ejecuta acciones (click, type, select, etc.).
+- **Google Gemini (`@google/genai`)** — único proveedor LLM, invocado en dos momentos (decisión de navegación en Fase 1, auditoría en Fase 2), nunca desde el frontend. Modelo configurable por variable de entorno (`GEMINI_MODEL`, default `gemini-2.5-flash`).
+- **MongoDB (Mongoose)** — `User`, `EvaluatorProfile`, `Evaluation`, `Finding`, `SnapshotEvidence`, `Report`, `AiInteraction`.
+- **Job runner en memoria** (`src/shared/infrastructure/job-runner.ts`) — singleton con `setImmediate`, documentado en su propio código como MVP a reemplazar por BullMQ; **sin ninguna persistencia ni recuperación**.
+
+### 3.2 Flujo de información (pipeline de dos fases)
+
+1. El frontend hace `POST /api/v1/evaluations` (`title`+`url`+perfil evaluador activo); el backend valida el perfil, crea el registro en Mongo en `PENDING`, encola el job (`jobRunner.add`) y responde de inmediato (no bloqueante).
+2. **Fase 1 — Exploración en vivo** (`evaluation.service.ts::runEvaluation`, líneas ~124-333): bucle de 3 a 8 iteraciones (límite calculado dinámicamente una sola vez, en la iteración 1, según densidad de elementos interactivos — `dynamic-iterations.service.ts`). En cada iteración: extrae snapshot del DOM → captura pantalla → persiste evidencia en Mongo → construye contexto (ventana deslizante de solo las últimas 3 acciones) → el **motor de reglas determinístico** (`rule-engine.service.ts`, 6 reglas) intenta decidir sin gastar tokens; solo si retorna `null` se invoca a Gemini (`aiService.makeDecision`) → se ejecuta la acción en el navegador real → se registra el resultado.
+3. **Fase 2 — Auditoría especializada** (asíncrona, disparada con `setImmediate` al cerrar la sesión de Playwright — el navegador se cierra siempre, la Fase 2 solo lee evidencia ya persistida): análisis determinístico puro (contraste WCAG 1.4.3, alt-text, nombre accesible, `<h1>`) + deduplicación/priorización de evidencia + llamada a Gemini con las 10 heurísticas de Nielsen y 7 criterios WCAG 2.2 explícitos → los hallazgos pasan por el **"Evidence Gate"** (degrada a `NOT_EVALUABLE` cualquier hallazgo sin evidencia trazable, con lenguaje especulativo o baja confianza) → el score final se calcula **100% en el backend** (el `overallScore` que devuelve Gemini se descarta explícitamente, confirmado en código: solo se desestructuran `executiveSummary` y `findings` de la respuesta de auditoría).
+4. El frontend hace *polling* (sin WebSockets/SSE) sobre `GET /evaluations/:id` hasta que `status` y `auditStatus` terminan, y luego consulta en paralelo `findings`, `reports` y `snapshots`.
+
+### 3.3 Diagrama textual del flujo real
+
+```
+[Usuario] → [Frontend React] --POST /api/v1/evaluations--> [Backend Express]
+                                                                  │
+                                              [Job en memoria — setImmediate, SIN persistencia]
+                                                                  │
+                              ┌───────────────────────────────────┴───────────────────────────────────┐
+                              │ FASE 1: Exploración (Playwright, sesión aislada por evaluación)         │
+                              │  RuleEngine (6 reglas, costo=0) → si no decide → Gemini (makeDecision)   │
+                              │  ejecuta acción real en Chromium → snapshot + screenshot → Mongo         │
+                              │  límite dinámico 3-8 iteraciones, ventana de contexto = últimas 3 acciones│
+                              └───────────────────────────────────┬───────────────────────────────────┘
+                                                                  │ cierre garantizado de sesión Playwright
+                              ┌───────────────────────────────────┴───────────────────────────────────┐
+                              │ FASE 2: Auditoría (asíncrona, sin navegador abierto)                    │
+                              │  Análisis determinístico (contraste/alt-text/h1) +                      │
+                              │  dedup/priorización de evidencia + Gemini (10 Nielsen + 7 WCAG 2.2) +    │
+                              │  Evidence Gate (anti-alucinación) + score 100% backend                   │
+                              └───────────────────────────────────┬───────────────────────────────────┘
+                                                                  │
+                                                      [Finding / Report / AiInteraction en Mongo]
+                                                                  │
+[Frontend] <--polling GET /evaluations/:id-- [Backend] <────────┘
+[Frontend] --GET findings/reports/snapshots (paralelo)--> [Backend] → [MongoDB] → render
+```
+
+Esta reconstrucción sigue en general el patrón `Usuario → Frontend → API → Backend → Orquestación → Automatización/IA → Persistencia → Resultados → Frontend` planteado como referencia, con dos matices reales: (1) la orquestación y la automatización/IA no son capas separadas sino que **conviven dentro del mismo servicio** (`evaluation.service.ts` orquesta directamente Playwright y Gemini, no hay un "orquestador" desacoplado como componente propio); (2) el pipeline es de **dos fases con cierre garantizado de recursos entre ellas** (Playwright se cierra antes de que empiece la auditoría), un detalle de diseño no trivial que resuelve un problema de concurrencia/recursos.
+
+---
+
+## 4. Tecnologías verificadas
+
+### 4.1 Frontend (`package.json`)
+
+| Categoría | Tecnología | Estado real |
+|---|---|---|
+| Framework UI | React 19 / React DOM | En uso pleno |
+| Enrutamiento | React Router DOM ^7 | En uso pleno (6 rutas reales + catch-all) |
+| Componentes UI | MUI v7 + Emotion | Única tecnología de UI activa |
+| Utilidades CSS | Tailwind CSS | **Instalado y configurado, 0 usos de `className` en todo el código** — dependencia inerte |
+| Estado global | Redux Toolkit + redux-persist | En uso (slice `auth` persistido, slice `evaluatorProfiles` no persistido) |
+| Formularios | react-hook-form + Yup | En uso pleno en todos los formularios |
+| HTTP | axios | En uso (interceptor de request inyecta JWT; interceptor de response sin lógica, con TODO de refresh) |
+| Animaciones | framer-motion, lottie-react | **Declaradas, 0 imports confirmados por grep** |
+| Testing | Vitest + jsdom + Testing Library | Configurado; **solo 2 archivos de test en todo el repo** |
+| Testing (no usado) | jest ^30 | Declarado en devDependencies, **no se ejecuta** (el runner real es Vitest) |
+| Build | Vite + tsc | Funcional (`dist/` con build local confirmado) |
+
+### 4.2 Backend (`package.json`)
+
+| Categoría | Tecnología | Estado real |
+|---|---|---|
+| Framework web | Express 5.1 | En uso (captura errores async nativamente, sin `express-async-errors`) |
+| Automatización | Playwright 1.60 (Chromium headless) | Núcleo funcional del sistema |
+| IA/LLM | `@google/genai` 1.3 (Gemini) | Único proveedor; modelo configurable, no hardcodeado |
+| Base de datos | MongoDB + Mongoose 8 | 6 modelos activos |
+| Validación | Zod 3.23 | Única capa de validación de input en toda la API |
+| Autenticación | jsonwebtoken 9 + bcryptjs 3 | JWT access/refresh reales, con revocación en Mongo |
+| Seguridad HTTP | helmet 8, cors 2.8 | Activos; **sin rate limiting** (no hay `express-rate-limit`) |
+| Logging | morgan (dev/combined) | Único mecanismo de logging (no hay winston/pino) |
+| Testing | — | **No hay Jest/Vitest/Mocha**; 61 scripts `*.test.ts` ejecutados manualmente con `ts-node` |
+| Upload de archivos | — | **No hay `multer`** ni middleware de carga de archivos |
+
+### 4.3 Servicios externos
+
+- **Google Gemini API**: modelo por defecto `gemini-2.5-flash` (nota: existe una inconsistencia menor — `.env.example` y `docker-compose.yml` declaran `gemini-2.0-flash` como default, distinto del default real en `src/config/env.ts`). Tarifas de costo hardcodeadas en `metrics-tracker.ts` ($0.30/$2.50 por millón de tokens entrada/salida para 2.5-flash).
+- Sin otros servicios de IA ni de terceros integrados.
+
+### 4.4 Infraestructura/despliegue
+
+- Backend: `Dockerfile` multi-stage real (build → runtime `node:20-slim` con Playwright/Chromium, usuario no-root) y `docker-compose.yml` (`api`+`mongo:7`+`mongo-express`, este último **sin autenticación básica** — riesgo si se expone fuera de localhost). El servicio `api` en `docker-compose.yml` corre la etapa `builder` con `npm run dev` (hot-reload), no la imagen de producción final.
+- Frontend: **sin Dockerfile, sin CI/CD, sin configuración de hosting** (no hay `vercel.json`/`netlify.toml` pese a que el documento académico menciona Vercel/Netlify como plataformas de despliegue).
+- Ningún repositorio tiene `.github/workflows` ni pipeline de CI/CD de ningún tipo.
+
+---
+
+## 5. Flujo de evaluación de sitios web (paso a paso, con veredicto)
+
+| # | Paso | Estado | Evidencia |
+|---|---|---|---|
+| 1 | Ingreso/configuración de URL | **IMPLEMENTADO** | `src/components/evaluations/EvaluationForm.tsx` (frontend) — solo 2 campos: `title`+`url`; `type` fijo en `'website'` |
+| 2 | Selección de perfil evaluador | **PARCIAL** | El perfil "activo" se selecciona en la pantalla de gestión de perfiles (`activateProfile`), no dentro del propio formulario de evaluación; `EvaluateWebPage.tsx` solo lee el perfil ya activo (`ActiveProfileCard.tsx`) |
+| 3 | Creación de la evaluación | **IMPLEMENTADO** | `POST /api/v1/evaluations`, `evaluation.service.ts::create` |
+| 4 | Llamada al backend | **IMPLEMENTADO** | `src/services/evaluations/evaluation.service.ts` (frontend) |
+| 5 | Inicialización del proceso | **IMPLEMENTADO (sin recuperación ante fallos)** | `jobRunner.add` (`setImmediate`, en memoria, sin cola persistente) |
+| 6 | Navegación vía Playwright | **IMPLEMENTADO** | `automation.service.ts::startSession`, sesión aislada por evaluación |
+| 7 | Extracción de información | **IMPLEMENTADO** | `extractCurrentSnapshot` — headings, imágenes, enlaces, formularios, landmarks, estilos computados, árbol de accesibilidad nativo |
+| 8 | Generación de contexto | **IMPLEMENTADO** | `context-builder.service.ts` — ventana deslizante de 3 últimas acciones |
+| 9 | Interacción con IA | **IMPLEMENTADO (condicional)** | `aiService.makeDecision`, invocado **solo** si el motor de reglas no decide |
+| 10 | Toma de decisiones | **IMPLEMENTADO** | `rule-engine.service.ts` (6 reglas) + Gemini como respaldo |
+| 11 | Ejecución de acciones | **IMPLEMENTADO** | `executeAction` — CLICK/TYPE/SELECT/CHECK/UNCHECK/HOVER/FOCUS/CLEAR/NAVIGATE/STOP_FLOW |
+| 12 | Análisis UX | **IMPLEMENTADO** | Fase 2, prompt contra 10 heurísticas de Nielsen (`ai.service.ts::buildV2AuditPrompt`) |
+| 13 | Análisis de accesibilidad | **IMPLEMENTADO** | Determinístico (contraste/alt-text/h1, `deterministic-analyzer.service.ts`) + Gemini (7 criterios WCAG 2.2 explícitos) |
+| 14 | Generación de hallazgos | **IMPLEMENTADO** | `Finding` model + `evidence-gate.service.ts` |
+| 15 | Generación de recomendaciones | **IMPLEMENTADO** | Campo `recommendation`, con reemplazo por texto genérico si viene vacío/inválido (Gate Rule 2) |
+| 16 | Almacenamiento | **IMPLEMENTADO** | Colecciones Mongo: `Evaluation`, `Finding`, `SnapshotEvidence`, `Report`, `AiInteraction` |
+| 17 | Consulta del resultado | **IMPLEMENTADO** | `GET /findings/evaluation/:id`, `GET /reports/evaluation/:id`, `GET /snapshots/evaluation/:id` |
+| 18 | Visualización en frontend | **IMPLEMENTADO** | `EvaluationSummary`, `FindingsAccordion`, `IterationTimeline`, `EvaluationRunningState` |
+
+**Lectura importante:** que los 18 pasos estén "IMPLEMENTADOS" no equivale a que el flujo sea estable en todos los escenarios. Ver secciones 7 y 20 sobre limitaciones reales (sin recuperación ante caída del proceso, brechas de captura documentadas en los propios fixtures de prueba, instrumentación de diagnóstico todavía activa por un incidente reciente).
+
+---
+
+## 6. Inteligencia artificial
+
+- **Proveedor/modelo**: `@google/genai` (SDK oficial), modelo configurable vía `GEMINI_MODEL` (default `gemini-2.5-flash`). Llamada única por invocación: `models.generateContent({model, contents: prompt, config: {responseMimeType: 'application/json'}})` (`src/infrastructure/gemini/gemini.client.ts`).
+- **Dos usos separados y con propósito distinto**: (a) Fase 1 — `buildV2DecisionPrompt`, decide la próxima acción de navegación, solo cuando el motor de reglas no puede resolverlo; (b) Fase 2 — `buildV2AuditPrompt`, evalúa la evidencia acumulada contra 10 heurísticas de Nielsen y 7 criterios WCAG 2.2 explícitos (1.1.1, 1.3.1, 1.4.3, 2.1.1, 2.4.4, 3.3.2, 4.1.2).
+- **Construcción de contexto**: Fase 1 usa una ventana deslizante (últimas 3 acciones) más el `blockingError` si existe y el resumen visible del DOM; Fase 2 usa un paquete de evidencia deduplicada y priorizada entre iteraciones (headings/imágenes/formularios/estilos computados/landmarks/enlaces/botones).
+- **Control de tamaño de contexto**: existe una **compuerta de presupuesto de payload pre-envío** (`payload-budgets.ts`, invocada desde `ai.service.ts::evaluatePayloadBudget`) que clasifica el prompt final en NORMAL/WARNING/CRITICAL contra umbrales calibrados con un incidente real documentado en el código (un payload de ~5.42M caracteres que disparó un error 429 real de Google el 2026-09-10, causado por un bug de *spread* de subdocumentos de Mongoose). **No es, técnicamente, un "circuit breaker"** (el código nunca usa ese término, no tiene estados abierto/semiabierto/cerrado ni ventana temporal de fallos) — es una validación estática por-llamada. Si el payload es CRÍTICO: en Fase 1 se lanza un error 502 (no hay una decisión de navegación de respaldo, por diseño explícito: "inventar sería peor que detener el flujo"); en Fase 2 se retorna un resultado seguro sin llamar a Gemini (solo hallazgos determinísticos).
+- **Validación de la respuesta**: Zod estricto (`V2AIOutputDecisionSchema`, `V2AuditOutputSchema` en `src/modules/ai/contracts/ai.contracts.ts`), con `safeParse`. `V2AuditFindingSchema` incluye dos `.refine()` a nivel de esquema: un `FAIL` sin evidencia o sin recomendación es rechazado en la validación misma (no solo después, en el Evidence Gate).
+- **Qué pasa ante respuesta inválida/errores/cuota**: `classifyAiError` distingue errores reintentables (503/429/502/504, errores de red) de no-reintentables (400/401/403/404); `executeWithRetry` aplica backoff exponencial con jitter (hasta 3 reintentos). Una respuesta vacía, JSON inválido o que no valide el esquema Zod se trata como **reintentable** (se reintenta la generación completa). Si se agotan los reintentos: en Fase 1 la evaluación entera falla (sin fallback seguro, por diseño); en Fase 2 se marca `auditStatus=FAILED` pero **se preservan los hallazgos determinísticos ya calculados**.
+- **Decisiones que la IA puede/no puede tomar**: puede sugerir la siguiente acción de navegación (Fase 1, solo si las reglas no deciden) y puede proponer hallazgos/severidad/recomendaciones (Fase 2). **No puede** determinar el score final (se ignora explícitamente su `overallScore`), y sus hallazgos de Fase 2 pueden ser degradados/descartados por el Evidence Gate si no son trazables a evidencia real enviada.
+- **Separación contexto / decisión / ejecución / análisis / evidencia**: SÍ existe y es real: `context-builder.service.ts` (contexto) → `rule-engine.service.ts`/`ai.service.ts` (decisión) → `automation.service.ts::executeAction` (ejecución) → `deterministic-analyzer.service.ts` + `ai.service.ts::performAuditAnalysis` (análisis) → `evidence-gate.service.ts` + `evidence-traceability.service.ts` (auditoría/evidencia, **el segundo aún sin commitear**).
+- **Relación con perfiles evaluadores**: el perfil completo se pasa a `context-builder.service.ts::buildContext` como contexto interpretativo — orienta el análisis, no ejecuta acciones ni decide autónomamente por sí mismo (ver sección 8).
+
+---
+
+## 7. Automatización y Playwright
+
+- **Gestión del navegador**: singleton con **un único proceso Chromium compartido** (`src/infrastructure/playwright/browser.manager.ts`, headless, timeout 30s, viewport 1280×720); cada evaluación obtiene su propio `BrowserContext`+`Page` aislados, identificados con user-agent propio (`EvalUXIA-Bot/1.0`).
+- **Acciones soportadas**: CLICK, TYPE (`page.fill`), SELECT, CHECK, UNCHECK, HOVER, FOCUS, CLEAR, NAVIGATE, STOP_FLOW — todas con timeout de 10s (30s para NAVIGATE) y resolución semántica de elemento (por label, texto, rol ARIA, placeholder, alt-text o test-id) a selector CSS único, verificado con `querySelectorAll(selector).length === 1` (documentado un bug real corregido: un mismo selector "ingenuo" coincidía con 5 elementos `<a>` distintos).
+- **Espera de contenido dinámico**: tras cada acción, la única espera explícita es `page.waitForLoadState('domcontentloaded').catch(()=>{})` — **no hay `waitForSelector` explícito** para contenido que aparece de forma asíncrona más allá del timeout implícito de cada comando de Playwright. Es una limitación real, no una garantía de manejo robusto de todo contenido dinámico.
+- **Extracción de snapshot**: headings, imágenes, enlaces, botones, formularios (con resolución de `<label>`), landmarks (ARIA + semánticos), estilos computados (hasta 500 candidatos, de los cuales 50 alimentan el analizador determinístico) y árbol de accesibilidad nativo de Playwright (`ariaSnapshot()`).
+- **Seguridad de red (SSRF)**: robusta y verificada. `src/shared/security/url-guard.ts` bloquea por protocolo y por rangos de IP (loopback, RFC1918, link-local/metadata cloud, CGNAT, IPv6 equivalentes) resolviendo el hostname vía DNS real. **Se re-verifica en cada request de red de Chromium** (no solo al crear la evaluación): `automation.service.ts` instala un interceptor `page.route('**/*')` que corre la verificación en navegación inicial, redirecciones, subrecursos y navegaciones dinámicas — protege también contra *DNS rebinding*. Matiz: las rutas HTTP directas de `automation.controller.ts` (navigate/snapshot/screenshot) validan la URL de entrada solo con `z.string().url()` a nivel de Zod; la protección SSRF real ocurre después, dentro de `automationService.startSession`.
+- **Manejo de errores de Playwright**: `executeAction` nunca lanza excepción — captura y retorna `{success:false, error}`; el fallo se registra en `previousActions` y en la siguiente iteración el motor de reglas (Regla 0) detiene el flujo si la acción falló (no hay reintento de la misma acción). Fallos más graves (abrir sesión, extraer snapshot, capturar pantalla) sí lanzan error y marcan la evaluación completa como `FAILED`.
+- **Fixtures de escenarios/widgets** (carpeta `fixtures/`, **sin commitear**, 23 pares HTML+groundtruth): acordeón, tabs con contenido inactivo, dropdown revelado por hover, modal, formularios con/sin `<label>`, botón sin nombre accesible, enlaces duplicados con destino distinto, secciones de navegación repetidas, contraste/imágenes, ausencia de `<h1>`, y 4 fixtures de estrés (DOM anidado, muchos estilos computados, texto largo). **Confirmado: no existe ningún fixture de carrusel/slider** — coincide con la brecha señalada previamente. Los propios `groundtruth.json` documentan además otras brechas de captura **no relacionadas con sliders**: el estado `aria-expanded` de acordeones nunca se captura, el foco (`document.activeElement`) nunca se captura (impide evaluar *focus-trap* en modales), y la comparación cruzada de textos de enlaces duplicados no es posible porque cada enlace se analiza de forma aislada.
+
+---
+
+## 8. Perfiles evaluadores
+
+- **Almacenamiento**: MongoDB, `EvaluatorProfile` (`src/modules/evaluator-profiles/evaluator-profile.model.ts`), con `userId` (referencia), `fullName`, `phrase`, `age`, `profession`, `maritalStatus`, `country`, `city`, `archetype`, `biography`, `personality`, `goals[]`, `frustrations[]`, `techSavviness`, `accessibilityNeeds[]`, `preferredDevice`, `isActive`.
+- **Creación**: formulario extenso en `UserEvaluatorProfileFormPage.tsx`, con 12 arquetipos junguianos hardcodeados; `goals`/`frustrations` se ingresan como texto libre y se parsean por línea.
+- **Selección/activación**: lógica de "un solo perfil activo por usuario" — `activateProfile` desactiva todos y activa uno; el primer perfil creado se marca activo automáticamente.
+- **Incorporación a una evaluación**: el perfil activo se pasa completo a `contextBuilder.buildContext`, que lo incluye como contexto interpretativo en los prompts enviados a Gemini (ambas fases).
+- **¿Afecta decisiones o es solo contexto?**: es **contexto para la IA**, no un agente autónomo. No hay evidencia en el código de que el perfil altere las reglas determinísticas del `rule-engine.service.ts` (esas 6 reglas son genéricas, independientes del perfil); su influencia real es sobre el *lenguaje y enfoque* de la interpretación de Gemini en ambas fases, no sobre la lógica de navegación determinística.
+- **¿Representa a un usuario real?** El documento académico (p. 28-29) es explícito: el perfil "no navega el sitio, no ejecuta acciones de manera autónoma y no representa a una persona real" — es una entidad independiente tanto del usuario real de EvalUXIA como del agente de automatización. Esta afirmación es **consistente con el código**: no se encontró ningún mecanismo donde el perfil ejecute acciones por sí mismo; solo orienta el análisis vía prompt.
+- **Aparición en resultados**: no se encontró evidencia de que el perfil evaluador aparezca explícitamente citado dentro de los hallazgos/reportes persistidos (los `Finding` no tienen un campo de referencia al perfil); su efecto es indirecto, vía el tono/enfoque de los hallazgos generados por Gemini.
+
+---
+
+## 9. Generación de hallazgos y recomendaciones
+
+- **Estructura de un `Finding`**: `findingGroup` (`ux`|`accessibility`), `status` (`PASS`|`FAIL`|`NOT_EVALUABLE`), `severity` (`critical`|`high`|`medium`|`low`|`info`), `confidence` (`high`|`medium`|`low`), `heuristicCode`/`heuristicName` (más un campo `heuristic` legacy, comentado explícitamente como "Deprecated legacy field for backward compatibility"), `wcagCriterion`, `evidence[]` tipada (`DOM_ATTRIBUTE`|`COMPUTED_STYLE`|`ACCESSIBILITY_TREE`|`SCREENSHOT`|`INTERACTION`|`HEADING_STRUCTURE`), `affectedElement`, `recommendation`, `screenshotUrl`.
+- **Mecanismo anti-alucinación ("Evidence Gate")**: `evidence-gate.service.ts::processAiFindings`, tres reglas: (1) degrada a `NOT_EVALUABLE` cualquier hallazgo cuyo selector no aparezca en la evidencia realmente enviada a Gemini; (2) degrada a `NOT_EVALUABLE` cualquier `FAIL` con lenguaje especulativo (lista de palabras clave en inglés/español: might/could/may/possibly/"podría"/"quizás"/"tal vez"), confianza baja o sin evidencia; (3) reemplaza recomendaciones vacías o idénticas al código heurístico por un texto genérico de respaldo. Complementado (en trabajo **aún sin commitear**) por `evidence-traceability.service.ts`, que construye un índice de evidencia exclusivamente a partir de lo enviado a Gemini y detecta selectores inventados o ambiguos. El propio código documenta el **límite deliberado** de este mecanismo: no evalúa si el hallazgo es semánticamente correcto, solo si el elemento referenciado existió realmente en el paquete enviado.
+- **Cálculo del score**: 100% determinístico en `audit-metrics.service.ts`. Deduplica hallazgos entre iteraciones por clave normalizada (criterio+selector), mapea a 10 heurísticas de Nielsen y hasta 10 criterios WCAG soportados (nota: el prompt a Gemini pide explícitamente 7 criterios WCAG, pero la lista `SUPPORTED_WCAG_CRITERIA` del código soporta 10 — los 3 adicionales podrían poblarse por el analizador determinístico o hallazgos legacy). Fórmula real: `overallScore = round(max(0, compliance% − penalización_por_severidad) × gammaCobertura)`, donde `gammaCobertura` penaliza también la baja cobertura de evaluación (no solo los fallos).
+- **Recomendaciones**: campo de texto libre generado por Gemini en Fase 2, con reemplazo automático por texto genérico cuando está vacío o es solo una repetición del nombre de la heurística (Gate Rule 2).
+
+---
+
+## 10. Evolución de la arquitectura y del desarrollo
+
+Reconstrucción a partir de `git log` de ambos repositorios (fechas confirmadas, no inferidas):
+
+| Fecha | Frontend | Backend |
+|---|---|---|
+| 2026-02-25 | `Add initial layouts` (primer commit, layouts base) | — |
+| 2026-05-18 | — | `Initial commit` (estructura inicial por capas, Dockerfile, docker-compose) |
+| 2026-05-19 | `Refactor modelos según análisis` | `Refactor de modulos y modelos según análisis` |
+| 2026-06-04/05 | `feat(auth): autenticación JWT real` | `feat: backend MVP con autenticación, perfiles evaluadores e integración IA` |
+| *(brecha ~2 meses en commits de ambos repos)* | | |
+| 2026-08-08 | `feat(evaluator-profiles)`, `feat(evaluations): v2 evaluation engine polling` | `feat(v2-architecture): motor de dos fases`, `feat(optimizations): SELECT + cycle prevention + sliding window + dynamic maxIterations`, `feat(evidence): snapshot evidence infrastructure` |
+| 2026-08-09 | `3A-3D` (evidence-based audit pipeline), `3E` (visualización de evidencia/métricas), `3F` (timeline de simulación) | Mismos commits homólogos: `3A-3D`, `3E`, `3F` |
+| 2026-09-06 | `checkpoint: Stage 2 + Phase A`, `checkpoint: Phase C.1` | `checkpoint: Stage 2 + Phase A + Phase A.1`, `checkpoint: Phase B Gemini resilience`, `checkpoint: Phase C.1` |
+| 2026-09-15 (sin commitear) | — | Nueva capa de deduplicación/priorización/trazabilidad de evidencia, motivada por incidente real del 2026-09-10 |
+
+**Lectura de la evolución**: el frontend arrancó dos meses antes que el backend (`Add initial layouts` en febrero, vs. el `Initial commit` del backend en mayo) — es decir, el desarrollo real no siguió estrictamente el orden "backend primero" implícito en el cronograma académico. Tras la autenticación (junio), hay una **brecha de ~2 meses sin commits en ningún repositorio** hasta agosto, cuando aparece de golpe una arquitectura mucho más sofisticada (motor de dos fases, reglas determinísticas, evidencia persistida) — esto es consistente con trabajo intenso no reflejado en commits granulares (los propios mensajes usan la palabra "checkpoint", sugiriendo consolidación de trabajo ya hecho, no commits atómicos por feature). A partir de ahí, el desarrollo entra en un ciclo de **hardening explícito y rotulado por fases** (ver 10.1), que continúa hoy (trabajo sin commitear).
+
+### 10.1 Evolución específica del motor de evaluación (evidencia funcional, no solo mensajes de commit)
+
+1. `a1c441e` (08/08) — introduce el motor de dos fases y el primer `MetricsTracker`; el análisis monolítico anterior queda marcado explícitamente `[V1 Legacy]` en `ai.service.ts` (código legado que convive, no fue eliminado).
+2. `053cef3` (08/08) — añade la acción SELECT, la Regla 0 de prevención de ciclos, la ventana deslizante de contexto y el cálculo dinámico de iteraciones: es el commit que crea la mayoría de la infraestructura de estabilidad de la Fase 1.
+3. `bd92ec0` (08/08) — introduce `SnapshotEvidence`, desacoplando la evidencia persistida de los objetos en memoria de la Fase 1 — condición necesaria para que la auditoría (Fase 2) corra después de cerrar la sesión de Playwright.
+4. `81c6617` → `dade37c` (06/09, "Phase B Gemini resilience") — formaliza `classifyAiError`/`executeWithRetry` con backoff+jitter tal como existen hoy; es el punto donde se endurece explícitamente la resiliencia ante fallos de Gemini.
+5. `0a2519b` (06/09, "Phase C.1") + trabajo actual sin commitear — añade tracking granular de tokens y, en el trabajo no confirmado en git, la capa completa de deduplicación/priorización/trazabilidad de evidencia, motivada explícitamente en comentarios por un **incidente real documentado en el propio código**: el 2026-09-10 un bug de *spread* de subdocumentos de Mongoose infló un prompt de ~90KB a ~5.4MB y causó un error 429 real de Google — reproducido en tests de regresión nuevos (`evidence-deduplication-mongoose.test.ts`, `token-budget-mongoose-regression.test.ts`).
+
+### 10.2 Otros rastros de evolución documentados en el propio código
+
+- Instrumentación de diagnóstico temporal (`[GeminiPayloadAudit]`, `[GeminiQuotaAudit]`, etc. en `gemini.client.ts`), explícitamente comentada como "TEMPORARY... meant to be removed once the payload/quota audit is complete" — **todavía presente**, no retirada.
+- Un archivo `.bak` (`audit-metrics.service.ts.bak`, sin commitear) — rastro de un refactor in-place (versión previa sin `normalizeCriterionKey`).
+- Campo `Finding.heuristic` mantenido explícitamente como legado por compatibilidad.
+- Componentes "V1"/"V2" conviviendo en el frontend (`EvaluationForm.tsx` genérico huérfano junto al simplificado en uso) y en el backend (`analyzeUx`/`buildUxAnalysisPrompt` "[V1 Legacy]" junto al pipeline V2 activo) — evidencia de iteración por sustitución progresiva, no de reescrituras desde cero.
+- Nomenclatura de fases de "hardening" rotulada directamente en nombres de archivo de test: T (t2-t7), D (d1-d3), E (e1-e4), F (f1-f8), G (g1-g7), H (h0 + runners), J (j1-j4 con variantes) — cada fase con un propósito de robustez documentado (ver sección 20).
+
+---
+
+## 11. Funcionalidades y estado actual
+
+| Funcionalidad | Estado | Evidencia técnica | Observaciones |
+|---|---|---|---|
+| Autenticación | **IMPLEMENTADO** (registro NO) | `auth.service.ts`, `authenticate.middleware.ts`, `LoginPage.tsx` | Login/logout/refresh reales con JWT+bcrypt; registro de usuario está en el backend pero la UI de registro del frontend está comentada ("se implementará más adelante"); sin refresh automático de token (TODO literal) |
+| Gestión de perfiles evaluadores | **IMPLEMENTADO** | CRUD completo, backend y frontend | Página de detalle (`EvaluatorProfileDetailPage.tsx`) existe pero está huérfana (sin ruta) |
+| Evaluación de URL pública | **IMPLEMENTADO, EN ESTABILIZACIÓN** | Pipeline completo descrito en sección 5 | Sin recuperación ante reinicio del proceso; brechas de captura documentadas (aria-expanded, foco, sliders) |
+| Automatización Playwright | **IMPLEMENTADO, EN ESTABILIZACIÓN** | `automation.service.ts`, 6 reglas + fixtures | Sin `waitForSelector` explícito para contenido dinámico más allá del timeout implícito |
+| Evaluación UX (heurísticas Nielsen) | **IMPLEMENTADO** | `ai.service.ts::buildV2AuditPrompt`, 10 heurísticas | Depende de Gemini, filtrado por Evidence Gate |
+| Evaluación de accesibilidad (WCAG) | **PARCIAL** | Determinístico (contraste/alt-text/h1) + Gemini (7 criterios WCAG explícitos) | `analyzeForms` no existe — WCAG 3.3.2 (etiquetas de formulario) depende 100% de Gemini, no hay verificación determinística |
+| Inteligencia artificial (Gemini) | **IMPLEMENTADO** | `gemini.client.ts`, reintentos con backoff, presupuesto de payload | Instrumentación de diagnóstico temporal aún activa |
+| Hallazgos (findings) | **IMPLEMENTADO** | `Finding` model + Evidence Gate | — |
+| Recomendaciones | **IMPLEMENTADO** | Campo `recommendation` + fallback genérico | Calidad depende de Gemini |
+| Evidencias (capturas/DOM) | **IMPLEMENTADO** | `SnapshotEvidence`, `uploads/` (201 capturas reales confirmadas) | — |
+| Historial de evaluaciones | **PARCIAL** | `HistoryPage.tsx` | Fetch único de hasta 50 registros, sin paginación real ni filtros |
+| Evaluación de prototipos/imágenes | **NO IMPLEMENTADO** | Enum `type:'prototype'` reservado en esquema; tarjeta deshabilitada en frontend | Sin endpoint de upload, sin `multer`, sin integración multimodal |
+| Visualización de resultados | **IMPLEMENTADO** | `EvaluationSummary`, `FindingsAccordion`, `IterationTimeline` | Parte más madura del frontend |
+| Pruebas funcionales | **PARCIAL** | 61 scripts `*.test.ts` (backend), 2 archivos (frontend) | Sin framework de testing real en backend; solo 1 script cableado a `npm test` |
+| Pruebas de usabilidad (SUS) | **NO IMPLEMENTADO** | Sin rastro en ningún repositorio | Ver sección 14 |
+| Cola de trabajos distribuida | **NO IMPLEMENTADO** | `job-runner.ts` en memoria, documentado como placeholder MVP | Sin recuperación tras reinicio |
+| Autorización por roles (RBAC) | **PARCIAL** | Campo `role` en `User`/JWT existe, **sin middleware que lo aplique** | Dato presente, sin *enforcement* |
+| Rate limiting | **NO IMPLEMENTADO** | Sin `express-rate-limit` en dependencias | — |
+| CI/CD | **NO IMPLEMENTADO** | Sin `.github/workflows` en ningún repositorio | — |
+
+---
+
+## 12. Estado del MVP
+
+### COMPLETADO (suficientemente implementado y funcional de extremo a extremo)
+- Autenticación (login/logout/JWT/revocación de refresh token).
+- CRUD de perfiles evaluadores, con lógica de perfil activo único.
+- Flujo completo de creación → exploración → auditoría → hallazgos → visualización de evaluaciones de URL pública.
+- Persistencia de evidencia (capturas reales, snapshots DOM) y de hallazgos con severidad/confianza.
+- Cálculo determinístico del score y de las métricas de cobertura.
+- Protección SSRF real, re-verificada en cada request de red.
+
+### EN ESTABILIZACIÓN (existe y funciona, pero requiere pruebas/correcciones/robustecimiento activo — evidenciado por trabajo en curso no commiteado y por instrumentación de diagnóstico aún presente)
+- Motor de exploración Playwright ante estructuras DOM diversas (fixtures documentan brechas reales: aria-expanded, foco, enlaces duplicados, ausencia de fixture de slider/carrusel).
+- Manejo de payload/cuota de Gemini (corrección de un incidente real del 2026-09-10, todavía en trabajo sin commitear).
+- Consistencia de conteo de tokens y costo (tracking acumulado solo en memoria de proceso, se pierde al reiniciar el backend).
+
+### EN DESARROLLO (parcialmente implementado)
+- Autorización por roles (dato presente, sin *enforcement*).
+- Historial de evaluaciones (sin paginación real ni filtros).
+- Verificación determinística de accesibilidad (falta cobertura de formularios/etiquetas).
+
+### PENDIENTE (necesario para el alcance declarado, no implementado)
+- Evaluación de prototipos por imagen (solo placeholder de esquema y UI).
+- Pruebas de usabilidad con usuarios (cuestionario SUS) — sin ningún rastro en el código.
+- Cola de trabajos persistente/distribuida (BullMQ o equivalente) y recuperación de evaluaciones tras un reinicio del proceso.
+- Refresh automático de token en el frontend.
+- Framework de testing real (los 61 scripts del backend son manuales, no una suite automatizada).
+- CI/CD.
+
+### FUERA DEL ALCANCE ACTUAL (evidencia de que son extensiones futuras, no parte del MVP)
+- Ejecución de "flujos" guiados por descripción textual libre (`/evaluate/flow`): ruta ni siquiera registrada en el router, aunque el backend modela parcialmente `flowDefinition`/`flowState` como reutilización del motor de Fase 1.
+- `AgentPanel.tsx` (chat conversacional): componente completo mas no cableado a ningún backend de IA conversacional.
+- Cualquier análisis multimodal de imágenes (Gemini soporta esta capacidad pero el código no la usa hoy).
+
+---
+
+## 13. Delimitación: elementos técnicos que deben considerarse
+
+Hechos técnicos (no redacción académica) que deberían sustentar la delimitación:
+
+- **Población/usuarios objetivo real que el sistema soporta hoy**: cualquier usuario autenticado (no hay roles diferenciados con permisos distintos pese a existir el campo `role`); el documento académico declara diseñadores UX/UI y desarrolladores como destinatarios — el código no impone ni verifica ningún perfil de usuario específico.
+- **Tipo de interfaces evaluadas realmente**: solo sitios web públicos accesibles por URL (HTTP/HTTPS, sin autenticación previa del sitio evaluado — el flujo no contempla login en el sitio objetivo). Prototipos por imagen: no implementado.
+- **Tipo de sitios web cubiertos**: cualquier URL pública que pase la verificación SSRF; sin distinción de SPA vs sitio estático más allá de una regla especial (N-01) mencionada en el prompt de auditoría sobre contenido dinámico/AJAX.
+- **Alcance de la evaluación**: 10 heurísticas de Nielsen (UX) + 7 criterios WCAG 2.2 explícitos en el prompt (el motor de métricas soporta hasta 10, pero solo 7 se piden activamente a Gemini).
+- **Alcance de la IA**: apoyo a la decisión de navegación (cuando las reglas determinísticas no alcanzan) y a la interpretación de evidencia en la auditoría; **no decide el score final**, y sus hallazgos pueden ser descartados por el Evidence Gate.
+- **Alcance de la automatización**: navegación real en Chromium headless, acciones limitadas a un conjunto fijo (click/type/select/check/uncheck/hover/focus/clear/navigate); sin capacidad de resolver CAPTCHA, ni de operar sitios que requieran login, ni de esperar explícitamente contenido asíncrono más allá de timeouts implícitos.
+- **Perfiles evaluadores**: contexto interpretativo para la IA, explícitamente NO un agente autónomo ni una simulación de comportamiento humano real (consistente entre documento académico y código).
+- **Restricciones técnicas duras**: sin recuperación de evaluaciones tras un reinicio del backend; límite dinámico de 3 a 8 iteraciones por evaluación; presupuesto de payload que puede abortar una auditoría completa si la evidencia es demasiado grande.
+- **Funcionalidades incluidas en el MVP actual**: ver sección 12, "COMPLETADO".
+- **Funcionalidades explícitamente excluidas del MVP actual**: evaluación de prototipos, pruebas SUS, cola distribuida, CI/CD (ver sección 12, "PENDIENTE"/"FUERA DE ALCANCE").
+- **Limitación técnica central a declarar honestamente**: la calidad y estabilidad del pipeline de exploración depende de la estructura HTML/comportamiento del sitio evaluado; existen escenarios documentados (por los propios fixtures) donde la evidencia capturada es insuficiente para un veredicto determinístico (formularios, enlaces duplicados, estados de foco/expansión), lo que puede producir hallazgos `NOT_EVALUABLE` en vez de un veredicto definitivo — esto es una limitación de diseño reconocida, no un defecto oculto.
+
+---
+
+## 14. Metodología de investigación: evidencia y aspectos pendientes
+
+El documento académico (secciones "Enfoque metodológico" y "UX Research", p. 29-31) **no declara explícitamente** un enfoque cuantitativo/cualitativo/mixto ni un tipo de investigación formal (exploratoria, aplicada, correlacional, etc., más allá de la etiqueta genérica "proyecto aplicado"). Cita textual relevante: *"su desarrollo se plantea mediante un proceso iterativo en el que las decisiones de diseño e implementación se revisan a partir de las pruebas realizadas sobre el sistema y de los problemas identificados durante su construcción"* — esto describe el proceso de *desarrollo*, no necesariamente un diseño de investigación formal.
+
+Instrumentos/técnicas mencionados explícitamente en el documento: cuestionario **System Usability Scale (SUS)** y "pruebas de usabilidad con usuarios participantes" (grupo de ~5 usuarios voluntarios, cronograma p. 39, recursos p. 40). **No se mencionan** encuestas generales, entrevistas ni observación estructurada como técnicas separadas.
+
+**Estado en el código**: no existe ningún rastro de un módulo de encuestas, cuestionario SUS, captura de puntuaciones de usabilidad, ni de ningún instrumento de recolección de datos de investigación, en ninguno de los dos repositorios (confirmado por búsqueda exhaustiva). La actividad de validación con usuarios está planificada para el 01/09-21/09/2026 (en curso a la fecha de esta auditoría) pero **no tiene ningún artefacto de código que la sustente todavía**.
+
+**Conclusión razonada**: con la evidencia disponible, **no se puede determinar** cuál es el diseño metodológico de investigación completo (tipo de estudio, población/muestra formal, criterios de validez) porque el documento académico no lo especifica más allá de mencionar el instrumento SUS y un grupo aproximado de 5 usuarios voluntarios. Esto **requiere definición/documentación académica explícita** antes de poder auditarlo desde el código — no es algo que el código pueda revelar por sí solo, ya que la investigación con usuarios reales aún no se ha ejecutado.
+
+---
+
+## 15. Metodología de desarrollo: evidencia y conclusión
+
+**Metodología declarada en el documento** (p. 29-30): no se nombra explícitamente Scrum, ágil, cascada ni "iterativo-incremental" como término formal. Se describe un "ciclo de construcción, prueba y refinamiento" ligado al Diseño Centrado en el Usuario, sin mención de sprints, roles (Scrum Master, Product Owner) ni artefactos de backlog.
+
+**Metodología realmente observable en el desarrollo** (evidencia de código/git):
+- Commits y comentarios usan consistentemente una nomenclatura de **fases/etapas secuenciales**: `Add initial layouts → Refactor según análisis → auth JWT real → perfiles evaluadores → motor de evaluación v2 → pipeline de auditoría 3A-3D → visualización 3E → timeline 3F → Stage 2 + Phase A → Phase B (Gemini resilience) → Phase C.1`.
+- En el backend, esta nomenclatura se profundiza en un ciclo de "hardening" con sub-fases rotuladas y respaldadas por baterías de test dedicadas: T (estrés/escalamiento), D (aislamiento de señales de automatización), E (widgets complejos), F (presupuesto de payload), G (comportamiento de Gemini: acuerdo, contradicción, alucinación, abstención, reintentos), H (validación con Gemini real contra fixtures curados), J (post-hardening: trazabilidad, presupuesto crítico, consistencia de tokens).
+- Cada fase de test está motivada por una pregunta de robustez concreta documentada en el propio código (p. ej., "¿Gemini se abstiene honestamente o fabrica un dato que nunca capturamos?").
+- Hay evidencia de iteración por **sustitución progresiva** (código "V1"/"V2" conviviendo), no de reescrituras desde cero.
+- No hay artefactos de Scrum (no hay backlog, no hay board, no hay mención de sprints con duración fija, no hay roles diferenciados en el propio repositorio — es un desarrollo unipersonal).
+
+**Conclusión razonada**: la forma más fiel de describir el desarrollo real es un **enfoque iterativo e incremental por fases técnicas**, con ciclos de construcción→prueba→identificación de fallos→corrección→consolidación claramente evidenciados en nombres de commits, nombres de archivos de test y comentarios de código, **sin corresponder formalmente a Scrum** (no hay ceremonias, roles ni artefactos de sprint verificables). Es más preciso describirlo como desarrollo iterativo-incremental guiado por hardening técnico progresivo, no forzarlo dentro del marco de Scrum solo porque el término pueda aparecer en el documento académico.
+
+---
+
+## 16. Reconstrucción del cronograma real
+
+### Cronograma originalmente planteado (documento académico, p. 36-39)
+
+| Actividad | Ventana planeada |
+|---|---|
+| 1. Arquitectura y base backend | 28/04 – 18/05/2026 |
+| 2. Backend funcional (auth, Mongo, CRUD perfiles, primer IA) | 19/05 – 08/06/2026 |
+| 3. Módulo de automatización Playwright | 09/06 – 29/06/2026 |
+| 4. Orquestación e interpretación de IA | 30/06 – 20/07/2026 |
+| 5. Análisis heurístico y generación de hallazgos | 21/07 – 10/08/2026 |
+| 6. Integración frontend-backend | 11/08 – 31/08/2026 |
+| 7. Validación funcional + usabilidad (SUS) | 01/09 – 21/09/2026 |
+
+### Contraste contra el desarrollo real (evidencia de `git log`)
+
+| Actividad | Evidencia real más cercana | Lectura |
+|---|---|---|
+| 1. Arquitectura base | Frontend: `Add initial layouts`, **2026-02-25** (¡dos meses antes de lo planeado!). Backend: `Initial commit`, 2026-05-18 (dentro de la ventana) | **Frontend adelantado; backend a tiempo** |
+| 2. Backend funcional (JWT/Mongo/perfiles/IA) | Backend `28f2d0b`, 2026-06-04; Frontend `8ce9ae3`, 2026-06-05 | **A tiempo** (dentro/cerca de la ventana 19/05-08/06) |
+| 3. Automatización Playwright | Commit funcional más cercano: `a1c441e`, **2026-08-08** | **No determinable con precisión desde git si hubo trabajo intermedio sin commitear**, pero el hito confirmado en git llega ~6 semanas después de lo planeado (fin de ventana 29/06) |
+| 4. Orquestación IA | Mismos commits del 08/08 (`053cef3`, `a1c441e`) | **Retraso aparente similar al de la actividad 3** respecto a la ventana planeada (fin 20/07) |
+| 5. Análisis heurístico/hallazgos | `bd92ec0`, `cb4dcb9` (3A-3D), `c6c26e6` (3E), `0ca6ed9` (3F) — todos 08-09/08/2026 | **Cercano a la ventana planeada** (fin 10/08) — de las fases más alineadas con el cronograma |
+| 6. Integración frontend-backend | Commits homólogos frontend/backend del 08-09/08/2026, **antes** del inicio de la ventana planeada (11/08) | **Adelantada respecto al plan**, pero seguida de una brecha hasta el 06/09 sin nueva integración visible en commits |
+| 7. Validación funcional + usabilidad SUS | **Sin ningún commit ni artefacto de código relacionado** a la fecha de esta auditoría (15/09/2026, dentro de la ventana planeada 01/09-21/09) | **Retraso real confirmado**: lo que el código muestra ocurriendo ahora (checkpoints "Stage 2 + Phase A/B/C.1", trabajo sin commitear de deduplicación/trazabilidad de evidencia) corresponde a **estabilización de las actividades 3-5**, no a la actividad 7 |
+
+**Conclusión**: las fases iniciales (arquitectura, backend base, integración) están al día o incluso adelantadas respecto al cronograma declarado. La brecha real y significativa está en el tramo final: mientras el cronograma ubica la validación funcional y de usabilidad (SUS) en curso ahora mismo, la evidencia de código muestra que el proyecto sigue en una fase de estabilización técnica del motor de evaluación (no prevista como actividad separada en el cronograma original), motivada por un incidente real de producción del 2026-09-10. Esto coincide exactamente con la narrativa que planteaste: la estabilización de la evaluación por URL se ha extendido más de lo previsto, empujando hacia atrás las actividades de prototipos e imágenes y de validación con usuarios.
+
+### Secuencia propuesta hacia finales de octubre de 2026 (actividades y dependencias, no cronograma académico final)
+
+1. **Cerrar el ciclo de estabilización en curso** (depende de nada más, es la actividad activa hoy): confirmar en un commit el trabajo de deduplicación/priorización/trazabilidad de evidencia; retirar o formalizar la instrumentación de diagnóstico temporal; cerrar la brecha de fixtures de slider/carrusel y las brechas documentadas (aria-expanded, foco, comparación de enlaces).
+2. **Formalizar el test runner** (depende de 1, es requisito para poder afirmar "cobertura de pruebas" con solidez académica): migrar los 61 scripts manuales a un framework real (Vitest/Jest) con un comando único.
+3. **Decidir el alcance real de "evaluación de prototipos" para el cierre del proyecto** (independiente de 1-2, pero compite por tiempo): dado el estado actual (0% implementado más allá del placeholder), evaluar si el alcance de la tesis debe ajustarse a un MVP reducido de este módulo o si se declara explícitamente como trabajo futuro.
+4. **Pruebas funcionales del sistema ya estabilizado** (depende de 1): validar el flujo completo de evaluación de URL en un conjunto representativo de sitios reales.
+5. **Diseño e implementación (si se mantiene en alcance) del instrumento SUS y reclutamiento de los ~5 usuarios voluntarios** (depende de 4, es la actividad más costosa en tiempo por depender de terceros): esto requiere un módulo nuevo completo, no existe hoy ningún artefacto.
+6. **Ejecución de pruebas de usabilidad y análisis de resultados** (depende de 5).
+7. **Documentación y cierre del proyecto de grado** (depende de todo lo anterior).
+
+---
+
+## 17. Recursos
+
+### Humanos
+- Estudiante desarrollador (según git, autora única de ambos repositorios — `Isis Rios`) — **ya utilizado**.
+- Tutor académico — **ya utilizado** (mencionado en el documento, no verificable desde código).
+- Grupo de ~5 usuarios voluntarios para pruebas de usabilidad — **necesario para terminar**, no reclutado aún (no determinable desde el código).
+
+### Tecnológicos/software (ya utilizados, verificados en código)
+- React 19, Vite, TypeScript, MUI v7, Redux Toolkit, React Router — frontend.
+- Node.js 20 (según `Dockerfile`), Express 5, TypeScript, MongoDB 7, Mongoose, Zod, Playwright 1.60 — backend.
+- `@google/genai` (Gemini) — requiere `GEMINI_API_KEY` con cuota vigente; el propio backend implementa una compuerta de presupuesto para evitar agotar la cuota.
+- Docker/docker-compose para desarrollo local.
+- Git/GitHub para control de versiones.
+
+### Necesarios para terminar (no presentes hoy)
+- Framework de testing real (Vitest/Jest en backend).
+- Módulo de encuestas/SUS (backend+frontend, no existe ningún artefacto).
+- Posible servicio de almacenamiento de archivos (si se implementa upload de prototipos — hoy no hay `multer` ni bucket configurado).
+- Entorno de despliegue reproducible accesible para los usuarios de las pruebas de usabilidad (hoy el despliegue es local/self-hosted vía Docker; el documento menciona Vercel/Netlify pero no hay ninguna configuración de esas plataformas en ningún repositorio).
+
+### Opcionales (mencionados como posible evolución, no bloqueantes para el MVP)
+- BullMQ/Redis para cola de trabajos distribuida (el propio código ya lo señala como paso futuro, no urgente si el volumen de evaluaciones concurrentes sigue siendo bajo).
+- CI/CD.
+
+### Costos
+El documento académico declara presupuesto **$0** en todos los recursos (tabla p. 39-40: equipo humano, computadora/internet, herramientas de desarrollo, Google AI Studio, plataformas de despliegue). No hay ninguna evidencia en el código de costos reales incurridos más allá del consumo estimado de tokens de Gemini que el propio sistema calcula (`metrics-tracker.ts`, tarifas hardcodeadas). **Costo real de operación (cuota de Gemini, hosting): por determinar** — no se puede establecer desde el código.
+
+---
+
+## 18. Resultados/productos esperados
+
+### Producto tecnológico (lo que el código puede sustentar hoy)
+- MVP funcional de evaluación automática de sitios web públicos por URL: **logrado**, con las salvedades de estabilización activa descritas.
+- Módulo de perfiles evaluadores: **logrado**.
+- Módulo de análisis heurístico (Nielsen) y verificación de accesibilidad (WCAG parcial): **logrado**, con la brecha determinística de formularios ya señalada.
+- Evaluación de prototipos por imagen: **no logrado** — es trabajo futuro, no un resultado alcanzado.
+
+### Resultado de validación (requiere ejecución con datos/usuarios reales, no solo código)
+- Validación funcional del sistema en escenarios representativos de sitios web: **parcialmente en curso** (evidenciado por el trabajo de estabilización actual), pero no ejecutada como una campaña formal y documentada de pruebas.
+- Validación de usabilidad con usuarios (SUS): **no lograda todavía** — no existe ningún artefacto de código ni evidencia de ejecución.
+
+### Resultado académico/documental
+- Evidencia técnica sólida y citable de un desarrollo iterativo por fases (útil para el capítulo de metodología de desarrollo).
+- Ausencia de evidencia de investigación metodológica formal ejecutada (útil para señalar honestamente qué queda pendiente en el capítulo de metodología de investigación).
+
+**Advertencia importante**: no debe afirmarse como "resultado logrado" la evaluación de prototipos ni la validación de usabilidad, porque ninguna de las dos tiene sustento en el código a la fecha de esta auditoría.
+
+---
+
+## 19. Comparación con el documento académico
+
+| Sección académica | Estado actual (código) | Qué coincide | Qué debe actualizarse |
+|---|---|---|---|
+| **Delimitación** (implícita, sin sección propia en el documento) | El MVP real solo cubre sitios web por URL; prototipos no implementados | El documento ya reconoce (p. 12) que lo entregado es un MVP "susceptible de ampliación" — es coherente con no forzar el alcance de prototipos como terminado | Redactar una sección de delimitación explícita que declare que la evaluación de prototipos queda fuera del alcance funcional actual del MVP, no solo como "futura ampliación" genérica |
+| **Objetivos** | Objetivo específico 2 exige "implementar los módulos de evaluación de prototipos visuales **y** sitios web públicos" | La evaluación de sitios web sí cumple sustancialmente este objetivo | El objetivo específico 2, tal como está redactado, **no se puede dar por cumplido en su totalidad** mientras no exista el módulo de prototipos — se recomienda documentar el cumplimiento parcial explícitamente, no forzar el objetivo como logrado |
+| **Marco metodológico — investigación** | No hay ningún instrumento de investigación implementado en código (ni SUS ni encuestas) | El documento correctamente no declara una metodología de investigación formal más allá de mencionar SUS y usuarios voluntarios | Debe definirse y documentarse formalmente el diseño metodológico de investigación (tipo de estudio, muestreo, análisis de datos) antes del cierre, ya que hoy es un vacío tanto en el documento como en el código |
+| **Marco metodológico — desarrollo** | Desarrollo iterativo-incremental por fases, sin artefactos de Scrum | El documento ya evita nombrar Scrum/ágil formalmente y describe un "ciclo de construcción, prueba y refinamiento" — esto es consistente con la evidencia de código | Ninguna corrección mayor necesaria; se puede reforzar con evidencia concreta de las fases T-J documentadas en el código |
+| **Cronograma** | Ver sección 16: actividades 1-2 y 6 a tiempo o adelantadas; actividades 3-5 con retraso aparente de ~6 semanas; actividad 7 (validación SUS) sin ningún avance de código a la fecha, pese a estar en su ventana planeada | Las fechas de inicio del proyecto (backend) y de la actividad 2 coinciden razonablemente con los commits reales | El cronograma debe actualizarse para reflejar que la estabilización técnica del motor de evaluación se extendió más allá de lo planeado (agosto-septiembre), desplazando la actividad de validación de usabilidad |
+| **Recursos** | Tecnologías backend (Node/TS/Express/MongoDB/Playwright/Gemini) y frontend (React/Vite/TS/MUI/Redux/React Router) coinciden exactamente con el código | Coincidencia casi total en tecnologías centrales | Corregir: (a) el documento menciona Tailwind CSS como herramienta de desarrollo del frontend, pero el código confirma que Tailwind está instalado y configurado sin ningún uso real (toda la UI es MUI); (b) el documento menciona Vercel/Netlify como plataformas de despliegue, pero no existe ninguna configuración de esas plataformas en ningún repositorio (el despliegue real es Docker/docker-compose self-hosted) |
+| **Resultados esperados** | Producto 1 (plataforma funcional) y Producto 2 (módulo heurístico/accesibilidad) tienen sustento real en código; Producto 3 (validación SUS) no tiene ningún sustento todavía | Los dos primeros resultados esperados son alcanzables y en gran parte ya alcanzados | El resultado 3 (validación SUS) debe presentarse con lenguaje que refleje que es la actividad pendiente crítica, no dar por sentado que ocurrirá sin más planificación (reclutamiento de usuarios, instrumento, módulo de captura) |
+
+---
+
+## 20. Limitaciones actuales
+
+- **Sin recuperación de trabajo tras un reinicio del backend**: el "job runner" es un singleton en memoria; si el proceso se reinicia a mitad de una evaluación, el registro queda indefinidamente en estado `RUNNING`/`auditStatus: RUNNING` sin que nada lo retome ni lo marque como fallido. Esto es una limitación real de producción, no solo de escalabilidad.
+- **Diversidad de estructuras HTML**: los propios fixtures de prueba documentan brechas de captura reales (no solo sliders/carruseles): estado `aria-expanded` de acordeones, foco del elemento activo (impide evaluar *focus-trap* en modales), y comparación cruzada de textos de enlaces duplicados. Estas brechas son limitaciones de diseño reconocidas en el propio código, no fallos ocultos.
+- **Verificación determinística de formularios incompleta**: no existe un `analyzeForms` determinístico; el criterio WCAG 3.3.2 (etiquetas de formulario) depende completamente de la interpretación de Gemini, sin respaldo determinístico.
+- **Dependencia de la calidad y disponibilidad de Gemini**: aunque hay reintentos con backoff y clasificación de errores, si se agotan los reintentos en Fase 1 la evaluación completa falla sin una ruta de navegación de respaldo (decisión de diseño explícita, no un descuido, pero sigue siendo una limitación operativa real).
+- **Cuotas y presupuesto de payload**: existe un mecanismo de protección (no un circuit breaker clásico, sino una validación estática por-llamada) calibrado a partir de un incidente real reciente (2026-09-10); no hay garantía de que cubra todos los escenarios de payload excesivo, solo los ya calibrados.
+- **Tracking de costo acumulado no persistente**: los contadores acumulativos de costo/tokens viven solo en memoria del proceso backend y se pierden al reiniciar (aunque las métricas por-evaluación individual sí se persisten en el reporte correspondiente).
+- **Tiempos de ejecución**: no se encontró en el código ninguna métrica de tiempo total esperado/típico de una evaluación completa más allá del registro de `totalExecutionTimeMs` por evaluación — **no determinable** un valor de referencia sin ejecutar el sistema.
+- **Evaluación de prototipos**: completamente pendiente; cualquier estimación de esfuerzo para completarla es una extrapolación razonable, no un hecho verificable en código.
+- **Validación con usuarios**: sin ningún artefacto; el riesgo real es que el cronograma la ubica ya en curso sin que exista base de código para ejecutarla.
+- **Testing como riesgo de calidad, no solo de proceso**: 61 scripts manuales sin framework real y sin ejecución automatizada en conjunto (`npm test` corre 1 solo archivo) significa que no hay garantía de que toda la batería de pruebas se ejecute de forma consistente antes de cada cambio — es una fragilidad real del proceso de desarrollo, más allá de la cobertura nominal de casos.
+- **Seguridad**: sin *rate limiting* en la API (expuesta a abuso de cuota si se publica); `mongo-express` en `docker-compose.yml` sin autenticación básica (riesgo si el entorno de desarrollo se expone fuera de `localhost`); sin sanitización explícita de contenido libre (campos como `description`/`biography`) más allá de la validación de tipo/formato de Zod.
+
+No se dramatiza ninguno de estos puntos: son limitaciones técnicas descritas de forma objetiva, consistentes con un MVP en fase de estabilización activa, no defectos que indiquen falta de rigor — de hecho, la existencia de 61 scripts de test organizados por fase y de fixtures con *groundtruth* documentando explícitamente sus propias brechas es evidencia de un proceso de calidad consciente de sus límites.
+
+---
+
+## 21. Trabajo pendiente para completar el MVP
+
+En orden de dependencia (retomando la secuencia de la sección 16):
+
+1. Cerrar y commitear el trabajo actual de estabilización de evidencia (deduplicación/priorización/trazabilidad), retirar o formalizar la instrumentación de diagnóstico temporal.
+2. Cerrar las brechas de captura documentadas por los propios fixtures (aria-expanded, foco, comparación de enlaces duplicados) y añadir cobertura para sliders/carruseles.
+3. Formalizar el test runner del backend (framework real, comando único que corra toda la suite).
+4. Implementar recuperación básica de evaluaciones ante reinicio del proceso (al menos, detectar y marcar como `FAILED` las evaluaciones que quedaron `RUNNING` al arrancar, aunque no se implemente una cola distribuida completa).
+5. Decidir y, si se mantiene en alcance, implementar el módulo de evaluación de prototipos (endpoint de upload, análisis multimodal con Gemini, adaptación de UI).
+6. Diseñar e implementar el instrumento SUS y el flujo de pruebas de usabilidad con usuarios reales.
+7. Ejecutar las pruebas funcionales y de usabilidad, analizar resultados.
+8. Cerrar documentación técnica y académica final.
+
+---
+
+## 22. Evidencias técnicas (índice de rutas citadas)
+
+**Backend** (`/Users/isisrios/Proyectos/Node/evaluxia_backend`):
+`src/shared/infrastructure/job-runner.ts` · `src/modules/evaluations/evaluation.service.ts` · `src/modules/evaluations/services/rule-engine.service.ts` · `src/modules/evaluations/services/dynamic-iterations.service.ts` · `src/modules/evaluations/services/context-builder.service.ts` · `src/modules/evaluations/services/audit-engine.service.ts` · `src/modules/evaluations/services/audit-metrics.service.ts` (+ `.ts.bak`) · `src/modules/evaluations/services/deterministic-analyzer.service.ts` · `src/modules/evaluations/services/evidence-gate.service.ts` · `src/modules/evaluations/services/evidence-traceability.service.ts` (sin commitear) · `src/modules/automation/automation.service.ts` · `src/infrastructure/playwright/browser.manager.ts` · `src/infrastructure/gemini/gemini.client.ts` · `src/modules/ai/ai.service.ts` · `src/modules/ai/contracts/ai.contracts.ts` · `src/shared/testing/payload-budgets.ts` (sin commitear) · `src/shared/security/url-guard.ts` · `src/modules/evaluator-profiles/evaluator-profile.model.ts` · `src/modules/evaluations/evaluation.model.ts` · `src/modules/findings/finding.model.ts` · `src/modules/reports/report.model.ts` · `src/modules/snapshots/snapshot-evidence.model.ts` · `src/modules/ai-interactions/ai-interaction.model.ts` · `src/shared/infrastructure/metrics-tracker.ts` · `src/shared/middleware/{error,logger,validate,authenticate}.middleware.ts` · `src/config/env.ts` · `fixtures/**` (sin commitear) · `src/shared/testing/tests/**` (T/D/E/F/G/H/J, sin commitear) · `Dockerfile` · `docker-compose.yml` · `package.json`.
+
+**Frontend** (`/Users/isisrios/Proyectos/React/evaluxia`):
+`src/routes/index.tsx` · `src/routes/PrivateRoute.tsx` · `src/pages/Evaluations/EvaluateWebPage.tsx` · `src/components/evaluations/{EvaluationForm,EvaluationSummary,FindingsAccordion,IterationTimeline,EvaluationRunningState,ActiveProfileCard}.tsx` · `src/components/EvaluationForm.tsx` (huérfano) · `src/components/AgentPanel.tsx` (huérfano) · `src/pages/UserEvaluatorProfiles/**` · `src/pages/History/HistoryPage.tsx` · `src/hooks/{useAuth,useEvaluations,useEvaluatorProfiles,useFindings,useReport}.ts` · `src/services/**/*.service.ts` · `src/services/api/apiClient.ts` · `src/features/auth/authSlice.ts` · `src/features/evaluatorProfiles/evaluatorProfilesSlice.ts` · `src/types/{auth,evaluation,evaluatorProfile}.types.ts` · `src/layouts/{Sidebar,Topbar}.tsx` · `vite.config.ts` · `tailwind.config.js` · `package.json`.
+
+**Documento académico**: `/Users/isisrios/Downloads/Proyecto aplicado de grado - EVALUXIA - ISIS RIOS (12).pdf` (páginas citadas inline en las secciones 14, 15, 16, 17, 18, 19).
+
+---
+
+## 23. Conclusiones
+
+1. EvalUXIA es un **MVP avanzado y técnicamente serio, en fase activa de estabilización**, no un producto terminado. La evaluación de sitios web públicos funciona de extremo a extremo y demuestra decisiones de arquitectura no triviales (separación reglas/IA con costo cero cuando aplica, score determinístico, cierre garantizado de recursos entre fases, anti-alucinación con límites documentados).
+2. El desarrollo real es **iterativo e incremental por fases técnicas**, evidenciado directamente en nombres de commits, nombres de archivos de test y comentarios de código — no corresponde a Scrum formal, y el propio documento académico ya evita esa etiqueta.
+3. Existe una **brecha real y verificable entre el cronograma declarado y el estado del código** solo en el tramo final (validación funcional y de usabilidad SUS): las fases iniciales están al día o adelantadas; la fase de estabilización del motor de evaluación se extendió más de lo planeado, consumiendo el tiempo destinado a las fases posteriores.
+4. La **evaluación de prototipos por imagen no existe** más allá de un placeholder de esquema y UI — es trabajo futuro real, y el objetivo específico 2 del documento académico, tal como está redactado hoy, no puede darse por cumplido en su totalidad.
+5. Las **pruebas de usabilidad con usuarios (SUS) no tienen ningún sustento en código** — es el vacío más importante a resolver o replanificar antes del cierre del proyecto.
+6. Los **perfiles evaluadores** están correctamente delimitados tanto en el documento como en el código como contexto interpretativo para la IA, no como simulación de usuarios reales — esta es una fortaleza conceptual consistente que debe preservarse en la redacción académica.
+7. Persisten **limitaciones técnicas reales y reconocidas por el propio proyecto** (sin recuperación ante reinicio, brechas de captura documentadas, testing sin framework formal, sin CI/CD) que deben declararse honestamente como parte de la delimitación y las limitaciones del trabajo de grado, no minimizarse ni ocultarse.
+
+---
+
+*Informe generado mediante auditoría de solo lectura del código fuente de ambos repositorios (frontend y backend), su historial de `git`, y el documento académico más reciente disponible, a la fecha indicada. Cada afirmación técnica está respaldada por una ruta de archivo, nombre de función/servicio, o commit verificado directamente. Donde la evidencia fue insuficiente, se declaró explícitamente "no determinable con la evidencia disponible" en vez de inferir.*
