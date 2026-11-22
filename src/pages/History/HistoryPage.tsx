@@ -1,7 +1,8 @@
 // src/pages/History/HistoryPage.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import {
   Alert,
+  Avatar,
   Box,
   Button,
   Chip,
@@ -15,6 +16,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
@@ -24,6 +26,7 @@ import { useTheme } from '@mui/material/styles'
 import { useEvaluations } from '@hooks/useEvaluations'
 import { useFindings } from '@hooks/useFindings'
 import { useReport } from '@hooks/useReport'
+import { useEvaluatorProfiles } from '@hooks/useEvaluatorProfiles'
 import FindingsAccordion from '@components/evaluations/FindingsAccordion'
 import EvaluationSummary from '@components/evaluations/EvaluationSummary'
 import IncompleteExplorationNotice from '@components/evaluations/IncompleteExplorationNotice'
@@ -37,34 +40,87 @@ const STATUS_CONFIG: Record<string, { label: string; color: 'default' | 'info' |
   failed:    { label: 'Fallida',     color: 'error' },
 }
 // ── Fila expandible ────────────────────────────────────────────────────────
-function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
+interface EvaluationRowProps {
+  evaluation: Evaluation
+  profileName?: string
+  profilesLoading?: boolean
+}
+
+function EvaluationRow({ evaluation, profileName, profilesLoading }: EvaluationRowProps) {
   const [open, setOpen] = useState(false)
-  const { findings, isLoading, error, fetchFindings, clear } = useFindings()
-  // [Revisión MVP] La fila solo mostraba `findings` -- el score/compliance/
-  // cobertura/resumen de IA ya calculados y persistidos (Report) nunca se
-  // pedían aquí, así que esa información quedaba permanentemente
-  // inalcanzable en el Historial una vez terminada la sesión en vivo
-  // (EvaluateWebPage/EvaluatePrototypePage solo la muestran para la
-  // evaluación recién creada en esa misma sesión del hook).
-  const { report, fetchReportData } = useReport()
   const [loaded, setLoaded] = useState(false)
   const theme = useTheme()
+
+  const {
+    findings,
+    isLoading: isFindingsLoading,
+    error: findingsError,
+    fetchFindings,
+  } = useFindings()
+
+  const {
+    report,
+    isLoading: isReportLoading,
+    error: reportError,
+    fetchReportData,
+  } = useReport()
+
   const canHaveReport = evaluation.auditStatus === 'completed'
-  const handleToggle = async () => {
-    if (!open && !loaded) {
+  const isDetailsLoading = isFindingsLoading || isReportLoading
+  const detailsError = findingsError || reportError
+
+  const loadData = useCallback(async () => {
+    try {
       await Promise.all([
         fetchFindings(evaluation._id),
         canHaveReport ? fetchReportData(evaluation._id) : Promise.resolve(),
       ])
       setLoaded(true)
+    } catch {
+      // Si falla la petición, loaded permanece false para permitir reintentos
     }
-    if (open) clear()
-    setOpen((v) => !v)
+  }, [evaluation._id, canHaveReport, fetchFindings, fetchReportData])
+
+  // Si la evaluación termina en segundo plano mientras el usuario está en el historial
+  const prevStatusRef = useRef(evaluation.status)
+  useEffect(() => {
+    if (prevStatusRef.current !== evaluation.status && evaluation.status === 'completed') {
+      if (open) {
+        loadData()
+      } else {
+        setLoaded(false)
+      }
+    }
+    prevStatusRef.current = evaluation.status
+  }, [evaluation.status, open, loadData])
+
+  const handleToggle = () => {
+    const nextOpen = !open
+    setOpen(nextOpen)
+
+    // Al abrir: si aún no se han cargado los datos (o hubo error previo), solicitarlos
+    if (nextOpen && !loaded && !isDetailsLoading) {
+      loadData()
+    }
   }
+
   const status = STATUS_CONFIG[evaluation.status] ?? { label: evaluation.status, color: 'default' }
-  const date = new Date(evaluation.createdAt).toLocaleDateString('es-MX', {
+
+  const dateObj = new Date(evaluation.createdAt)
+  const formattedDate = dateObj.toLocaleDateString('es-MX', {
     day: '2-digit', month: 'short', year: 'numeric',
   })
+  const formattedTime = dateObj.toLocaleTimeString('es-MX', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  })
+
+  const resolvedProfileName =
+    profileName ||
+    (typeof evaluation.evaluatorProfileId === 'object' && evaluation.evaluatorProfileId !== null
+      ? (evaluation.evaluatorProfileId as unknown as { fullName?: string })?.fullName
+      : undefined) ||
+    '—'
+
   const summary = buildFindingSummary(findings)
   return (
     <>
@@ -74,7 +130,15 @@ function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
         onClick={handleToggle}
       >
         <TableCell>
-          <Button size="small" variant="text" sx={{ minWidth: 0, p: 0, color: 'text.secondary' }}>
+          <Button
+            size="small"
+            variant="text"
+            sx={{ minWidth: 0, p: 0, color: 'text.secondary' }}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleToggle()
+            }}
+          >
             {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
           </Button>
         </TableCell>
@@ -108,7 +172,34 @@ function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
           )}
         </TableCell>
         <TableCell>
-          <Typography variant="body2" color="text.secondary">{date}</Typography>
+          {profilesLoading && resolvedProfileName === '—' ? (
+            <CircularProgress size={16} />
+          ) : (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Avatar
+                sx={{
+                  width: 24,
+                  height: 24,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  bgcolor: theme.palette.primary.main,
+                  color: '#fff',
+                }}
+              >
+                {resolvedProfileName !== '—' ? resolvedProfileName.charAt(0).toUpperCase() : '?'}
+              </Avatar>
+              <Typography variant="body2" fontWeight={500} color="text.primary">
+                {resolvedProfileName}
+              </Typography>
+            </Box>
+          )}
+        </TableCell>
+        <TableCell>
+          <Tooltip title={dateObj.toISOString()} arrow>
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+              {formattedDate}, {formattedTime}
+            </Typography>
+          </Tooltip>
         </TableCell>
         <TableCell>
           <Chip
@@ -119,9 +210,9 @@ function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
           />
         </TableCell>
       </TableRow>
-      {/* Fila expandible con findings */}
+      {/* Fila expandible con findings y reporte */}
       <TableRow>
-        <TableCell colSpan={4} sx={{ p: 0, border: 0 }}>
+        <TableCell colSpan={5} sx={{ p: 0, border: 0 }}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box
               sx={{
@@ -130,9 +221,28 @@ function EvaluationRow({ evaluation }: { evaluation: Evaluation }) {
                 borderLeft: `4px solid ${theme.palette.primary.light}`,
               }}
             >
-              {isLoading && <CircularProgress size={20} />}
-              {error && <Alert severity="error">{error}</Alert>}
-              {!isLoading && loaded && (
+              {isDetailsLoading && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1 }}>
+                  <CircularProgress size={20} />
+                  <Typography variant="body2" color="text.secondary">
+                    Cargando hallazgos y reporte...
+                  </Typography>
+                </Box>
+              )}
+              {detailsError && !isDetailsLoading && (
+                <Alert
+                  severity="error"
+                  sx={{ mb: 2 }}
+                  action={
+                    <Button color="inherit" size="small" onClick={loadData}>
+                      Reintentar
+                    </Button>
+                  }
+                >
+                  {detailsError}
+                </Alert>
+              )}
+              {!isDetailsLoading && !detailsError && loaded && (
                 <>
                   {evaluation.status === 'completed' && (
                     <IncompleteExplorationNotice
@@ -161,9 +271,20 @@ const HISTORY_REFRESH_INTERVAL_MS = 5000
 
 export default function HistoryPage() {
   const { evaluations, isLoading, error, fetchEvaluations } = useEvaluations()
+  const { profiles, isLoading: profilesLoading, fetchProfiles } = useEvaluatorProfiles()
+
   useEffect(() => {
     fetchEvaluations(1, 50)
-  }, [fetchEvaluations])
+    fetchProfiles()
+  }, [fetchEvaluations, fetchProfiles])
+
+  const profileMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const p of profiles) {
+      map[p._id] = p.fullName
+    }
+    return map
+  }, [profiles])
 
   // [Revisión MVP] La lista se pedía una sola vez: si el usuario abre el
   // Historial mientras una evaluación sigue 'pending'/'running', el chip de
@@ -220,13 +341,23 @@ export default function HistoryPage() {
               <TableRow sx={{ bgcolor: '#f8f6ff' }}>
                 <TableCell width={48} />
                 <TableCell><Typography fontWeight={700} variant="body2">Evaluación</Typography></TableCell>
-                <TableCell><Typography fontWeight={700} variant="body2">Fecha</Typography></TableCell>
+                <TableCell><Typography fontWeight={700} variant="body2">Perfil evaluador</Typography></TableCell>
+                <TableCell><Typography fontWeight={700} variant="body2">Fecha y hora</Typography></TableCell>
                 <TableCell><Typography fontWeight={700} variant="body2">Estado</Typography></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {evaluations.map((ev) => (
-                <EvaluationRow key={ev._id} evaluation={ev} />
+                <EvaluationRow
+                  key={ev._id}
+                  evaluation={ev}
+                  profileName={
+                    typeof ev.evaluatorProfileId === 'string'
+                      ? profileMap[ev.evaluatorProfileId]
+                      : undefined
+                  }
+                  profilesLoading={profilesLoading}
+                />
               ))}
             </TableBody>
           </Table>
