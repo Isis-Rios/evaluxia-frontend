@@ -14,6 +14,7 @@ import UserEvaluatorProfileFormPage from '@pages/UserEvaluatorProfiles/UserEvalu
 // Evaluations
 import EvaluateWebPage from '@pages/Evaluations/EvaluateWebPage'
 import EvaluatePrototypePage from '@pages/Evaluations/EvaluatePrototypePage'
+import EvaluateFlowPage from '@pages/Evaluations/EvaluateFlowPage'
 
 export default function AppRoutes() {
   return (
@@ -37,6 +38,7 @@ export default function AppRoutes() {
         {/* Evaluaciones */}
         <Route path="/evaluate/web" element={<EvaluateWebPage />} />
         <Route path="/evaluate/prototype" element={<EvaluatePrototypePage />} />
+        <Route path="/evaluate/flow" element={<EvaluateFlowPage />} />
       </Route>
 
       {/* Catch all */}

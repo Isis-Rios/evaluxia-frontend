@@ -123,7 +123,7 @@ export default function Sidebar() {
               { icon: <RecentActors />, label: 'Perfiles evaluadores', path: '/perfiles' },
               { icon: <Web />, label: 'Evaluar sitio web', path: '/evaluate/web' },
               { icon: <CropOriginal />, label: 'Evaluar prototipo', path: '/evaluate/prototype' },
-              { icon: <AccountTree />, label: 'Ejecutar flujo', path: '/evaluate/flow' },
+              { icon: <AccountTree />, label: 'Evaluar flujo', path: '/evaluate/flow' },
               { icon: <WorkHistory />, label: 'Historial', path: '/historial' }
             ].map((item, index) => (
               <Tooltip key={index} title={!open ? item.label : ''} placement="right">

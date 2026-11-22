@@ -1,5 +1,5 @@
 // src/pages/Home/HomePage.tsx
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
   Alert,
   Avatar,
@@ -14,6 +14,7 @@ import {
   Divider,
   Grid,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import {
@@ -47,10 +48,18 @@ export default function HomePage() {
   const { evaluations, isLoading: evalsLoading, fetchEvaluations } = useEvaluations()
   useEffect(() => { fetchEvaluations(1, 5) }, [fetchEvaluations])
 
-  // Perfil activo
+  // Perfil activo y mapa de perfiles
   const { profiles, fetchProfiles } = useEvaluatorProfiles()
   useEffect(() => { fetchProfiles() }, [fetchProfiles])
   const activeProfile = profiles.find((p) => p.isActive) ?? null
+
+  const profileMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const p of profiles) {
+      map[p._id] = p.fullName
+    }
+    return map
+  }, [profiles])
 
   const firstName = user?.name?.split(' ')[0] ?? 'evaluador'
 
@@ -76,10 +85,10 @@ export default function HomePage() {
     {
       id: 'card-execute-flow',
       icon: <AccountTree sx={{ fontSize: 36 }} />,
-      title: 'Ejecutar flujo',
+      title: 'Evaluar flujo',
       description: 'El agente simula una interacción completa basada en tu descripción y valida funcionalidades end to end.',
       active: false,
-      action: () => {},
+      action: () => navigate('/evaluate/flow'),
     },
   ]
 
@@ -246,9 +255,23 @@ export default function HomePage() {
           <Stack divider={<Divider />} sx={{ border: '1px solid #e0e0e0', borderRadius: 2, overflow: 'hidden', width: '100%' }}>
             {evaluations.slice(0, 5).map((ev) => {
               const status = STATUS_CONFIG[ev.status] ?? { label: ev.status, color: 'default' }
-              const date = new Date(ev.createdAt).toLocaleDateString('es-MX', {
+              const dateObj = new Date(ev.createdAt)
+              const date = dateObj.toLocaleDateString('es-MX', {
                 day: '2-digit', month: 'short', year: 'numeric',
               })
+              const time = dateObj.toLocaleTimeString('es-MX', {
+                hour: '2-digit', minute: '2-digit', hour12: false,
+              })
+              const profileName =
+                (typeof ev.evaluatorProfileId === 'string' && profileMap[ev.evaluatorProfileId]) ||
+                (typeof ev.evaluatorProfileId === 'object' && (ev.evaluatorProfileId as unknown as { fullName?: string })?.fullName) ||
+                undefined
+
+              const captionText =
+                ev.type === 'prototype'
+                  ? (ev.description || 'Prototipo sin descripción')
+                  : (ev.url || 'Sin URL')
+
               return (
                 <Box
                   key={ev._id}
@@ -256,7 +279,7 @@ export default function HomePage() {
                     px: 2,
                     py: 1.5,
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start',
                     gap: 2,
                     cursor: 'pointer',
                     '&:hover': { bgcolor: '#fafafa' },
@@ -267,7 +290,11 @@ export default function HomePage() {
                     badgeContent=" "
                     color={status.color}
                     variant="dot"
-                    sx={{ '& .MuiBadge-badge': { width: 10, height: 10, borderRadius: '50%' } }}
+                    sx={{
+                      mt: 0.5,
+                      flexShrink: 0,
+                      '& .MuiBadge-badge': { width: 10, height: 10, borderRadius: '50%' },
+                    }}
                   >
                     {ev.type === 'prototype' ? (
                       <ImageIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
@@ -277,21 +304,55 @@ export default function HomePage() {
                   </Badge>
 
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="body2" fontWeight={600} noWrap>{ev.title}</Typography>
-                    {/*
-                      [Revisión MVP] Antes siempre mostraba `ev.url`, que es
-                      `undefined` para prototipos (solo tienen `imageUrl`) --
-                      cada fila de prototipo aparecía con un ícono de sitio
-                      web y una leyenda en blanco.
-                    */}
-                    <Typography variant="caption" color="text.secondary" noWrap>
-                      {ev.type === 'prototype' ? (ev.description || 'Prototipo sin descripción') : ev.url}
+                    <Typography variant="body2" fontWeight={600} noWrap>
+                      {ev.title}
                     </Typography>
+                    <Tooltip title={captionText} arrow placement="bottom-start" enterDelay={600}>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          wordBreak: 'break-word',
+                          lineHeight: 1.4,
+                          mt: 0.25,
+                        }}
+                      >
+                        {captionText}
+                      </Typography>
+                    </Tooltip>
                   </Box>
 
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-                    <Chip label={status.label} color={status.color} size="small" sx={{ fontWeight: 600, fontSize: 11 }} />
-                    <Typography variant="caption" color="text.secondary">{date}</Typography>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      flexShrink: 0,
+                      mt: 0.25,
+                    }}
+                  >
+                    {profileName && (
+                      <Chip
+                        label={profileName}
+                        size="small"
+                        variant="outlined"
+                        sx={{ height: 20, fontSize: 11, fontWeight: 500 }}
+                      />
+                    )}
+                    <Chip
+                      label={status.label}
+                      color={status.color}
+                      size="small"
+                      sx={{ fontWeight: 600, fontSize: 11 }}
+                    />
+                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {date}, {time}
+                    </Typography>
                   </Box>
                 </Box>
               )
