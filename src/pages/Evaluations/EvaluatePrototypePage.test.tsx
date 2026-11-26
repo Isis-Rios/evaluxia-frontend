@@ -179,22 +179,24 @@ describe('EvaluatePrototypePage — flujo end-to-end (mock)', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    // ── Resultado ──
-    expect(screen.getByText(/Hallazgos \(1\)/i)).toBeTruthy()
+    // ── Resultado (vista a ancho completo en 4 pestañas, sin columna lateral de perfil) ──
+    expect(screen.queryByText('PERFIL EVALUADOR ACTIVO')).toBeNull()
+    expect(screen.getByRole('tab', { name: /Hallazgos \(1\)/i })).toBeTruthy()
 
-    // Finding: descripción del problema, descripción visual + región, severity/status implícitos vía recomendación (FAIL)
+    // Pestaña Resumen (activa por defecto): Coverage y Score
+    expect(screen.getByText(/Calculado sobre 10 de 15 criterios aplicables evaluados/i)).toBeTruthy()
+    expect(screen.getByText('10 / 15')).toBeTruthy()
+    expect(screen.getByText(/Fuera del alcance visual/i)).toBeTruthy()
+
+    // Pestaña Hallazgos: descripción del problema, descripción visual + región y recomendación
+    fireEvent.click(screen.getByRole('tab', { name: /Hallazgos \(1\)/i }))
     expect(screen.getByText(/El botón principal usa un estilo distinto/i)).toBeTruthy()
     expect(screen.getByText(/botón Confirmar compra/i)).toBeTruthy()
     expect(screen.getByText(/región: bottom-center/i)).toBeTruthy()
     expect(screen.getByText(/Unificar el estilo visual de los botones principales/i)).toBeTruthy()
 
-    // Coverage (Report) — P7.2: ahora se muestra dentro de EvaluationSummary,
-    // junto al overallScore, en vez de un bloque de chips separado.
-    expect(screen.getByText(/Calculado sobre 10 de 15 criterios aplicables evaluados/i)).toBeTruthy()
-    expect(screen.getByText('10 / 15')).toBeTruthy()
-    expect(screen.getByText(/Fuera del alcance visual/i)).toBeTruthy()
-
-    // Imagen asociada
+    // Pestaña Prototipo visual: imagen asociada accesible
+    fireEvent.click(screen.getByRole('tab', { name: /Prototipo visual/i }))
     expect(screen.getByAltText(/Prototipo evaluado/i)).toBeTruthy()
   })
 

@@ -169,10 +169,66 @@ describe('HistoryPage — Cabecera con fecha, hora y perfil evaluador', () => {
     expect(screen.getByText(`${formattedDate}, ${formattedTime}`)).toBeTruthy()
   })
 
-  it('mantiene los hallazgos al cerrar y volver a abrir la fila expandible (evita pérdida de datos)', async () => {
+  it('abre el detalle a ancho completo fuera de la tabla y conserva la caché al volver al listado y reabrir (sin redundancia de red)', async () => {
     mockedEvaluationService.getAll.mockResolvedValue({
       status: 'success',
       data: [makeEvaluation()],
+      total: 1,
+      page: 1,
+      limit: 50,
+    })
+    mockedProfileService.getAll.mockResolvedValue({
+      status: 'success',
+      data: [makeProfile()],
+      total: 1,
+      page: 1,
+      limit: 50,
+    })
+
+    const { container } = render(
+      <Provider store={store}>
+        <MemoryRouter>
+          <HistoryPage />
+        </MemoryRouter>
+      </Provider>,
+    )
+
+    // 1. Clic en la fila para abrir el detalle a ancho completo
+    const rowTitle = await screen.findByText('Evaluación Wikipedia')
+    fireEvent.click(rowTitle)
+
+    // La vista de detalle NO está anidada dentro de la tabla principal de historial
+    expect(await screen.findByRole('button', { name: /Volver al historial/i })).toBeTruthy()
+    expect(container.querySelector('table')).toBeNull()
+
+    // Ir a la pestaña Hallazgos y comprobar el hallazgo cargado
+    fireEvent.click(screen.getByRole('tab', { name: /Hallazgos \(1\)/i }))
+    expect(await screen.findByText('Falta de feedback visual al interactuar')).toBeTruthy()
+    expect(mockedFindingsService.getByEvaluationId).toHaveBeenCalledTimes(1)
+
+    // 2. Volver al listado del historial
+    fireEvent.click(screen.getByRole('button', { name: /Volver al historial/i }))
+    expect(await screen.findByText('Evaluación Wikipedia')).toBeTruthy()
+
+    // 3. Reabrir la misma evaluación: los datos continúan disponibles en caché sin repetir llamada de red
+    fireEvent.click(screen.getByText('Evaluación Wikipedia'))
+    fireEvent.click(await screen.findByRole('tab', { name: /Hallazgos \(1\)/i }))
+    expect(await screen.findByText('Falta de feedback visual al interactuar')).toBeTruthy()
+    expect(mockedFindingsService.getByEvaluationId).toHaveBeenCalledTimes(1)
+  })
+
+  it('muestra la matriz de cobertura y la vista previa de imagen en evaluaciones históricas de prototipos', async () => {
+    mockedEvaluationService.getAll.mockResolvedValue({
+      status: 'success',
+      data: [
+        makeEvaluation({
+          _id: 'eval-proto-1',
+          title: 'Prototipo Admisiones',
+          type: 'prototype',
+          url: undefined,
+          imageUrl: '/uploads/prototypes/proto1.jpg',
+        }),
+      ],
       total: 1,
       page: 1,
       limit: 50,
@@ -193,22 +249,58 @@ describe('HistoryPage — Cabecera con fecha, hora y perfil evaluador', () => {
       </Provider>,
     )
 
-    // 1. Clic para expandir
+    const rowTitle = await screen.findByText('Prototipo Admisiones')
+    fireEvent.click(rowTitle)
+
+    // Pestaña Prototipo visual muestra la imagen del prototipo
+    fireEvent.click(await screen.findByRole('tab', { name: /Prototipo visual/i }))
+    expect(await screen.findByAltText('Prototipo evaluado')).toBeTruthy()
+
+    // Pestaña Criterios muestra la matriz de cobertura
+    fireEvent.click(screen.getByRole('tab', { name: /Criterios/i }))
+    expect(screen.getByText(/MATRIZ DE COBERTURA Y TRAZABILIDAD POR CRITERIO/i)).toBeTruthy()
+  })
+
+  it('muestra el IterationTimeline en la pestaña Recorrido y evidencias para una evaluación web histórica con snapshots', async () => {
+    mockedEvaluationService.getAll.mockResolvedValue({
+      status: 'success',
+      data: [makeEvaluation()],
+      total: 1,
+      page: 1,
+      limit: 50,
+    })
+    mockedProfileService.getAll.mockResolvedValue({
+      status: 'success',
+      data: [makeProfile()],
+      total: 1,
+      page: 1,
+      limit: 50,
+    })
+    mockedSnapshotsService.getByEvaluationId.mockResolvedValue([
+      {
+        _id: 'snap-1',
+        evaluationId: 'eval-1',
+        iteration: 1,
+        url: 'https://www.wikipedia.org/',
+        screenshotPath: '/uploads/evaluation_eval-1_step_1.png',
+        action: { actionType: 'NAVIGATE', description: 'Carga inicial de Wikipedia' },
+        timestamp: '2026-11-14T14:30:00.000Z',
+      },
+    ])
+
+    render(
+      <Provider store={store}>
+        <MemoryRouter>
+          <HistoryPage />
+        </MemoryRouter>
+      </Provider>,
+    )
+
     const rowTitle = await screen.findByText('Evaluación Wikipedia')
     fireEvent.click(rowTitle)
 
-    // Debe consultar el servicio y mostrar el hallazgo
-    expect(await screen.findByText('Falta de feedback visual al interactuar')).toBeTruthy()
-    expect(mockedFindingsService.getByEvaluationId).toHaveBeenCalledTimes(1)
-
-    // 2. Clic para cerrar la fila
-    fireEvent.click(rowTitle)
-
-    // 3. Clic para volver a abrir la fila
-    fireEvent.click(rowTitle)
-
-    // El hallazgo debe continuar visible sin desaparecer y sin redundancia de red
-    expect(await screen.findByText('Falta de feedback visual al interactuar')).toBeTruthy()
-    expect(mockedFindingsService.getByEvaluationId).toHaveBeenCalledTimes(1)
+    fireEvent.click(await screen.findByRole('tab', { name: /Recorrido y evidencias \(1\)/i }))
+    expect(await screen.findByText(/TIMELINE VISUAL DE LA SIMULACIÓN/i)).toBeTruthy()
+    expect(screen.getByText('[NAVIGATE] Carga inicial de Wikipedia')).toBeTruthy()
   })
 })

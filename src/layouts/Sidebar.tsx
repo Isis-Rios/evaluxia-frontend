@@ -10,6 +10,7 @@ import {
   Avatar,
   Typography,
   useTheme,
+  useMediaQuery,
   Tooltip,
 } from '@mui/material'
 import {
@@ -24,21 +25,26 @@ import {
   CropOriginal,
   WorkHistory
 } from '@mui/icons-material'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import logo from '@assets/images/logo-white.png'
 import type { RootState } from '@app/store'
 import { useSelector, useDispatch } from 'react-redux'
 import { logout } from '@features/auth/authSlice'
 import { useNavigate } from 'react-router-dom'
 
-const drawerWidth = 300
+const drawerWidth = 240
 
 export default function Sidebar() {
   const activeProfile = useSelector((state: RootState) => state.auth.user)
   const dispatch = useDispatch()
-  const [open, setOpen] = useState(true)
   const theme = useTheme()
+  const isCompactViewport = useMediaQuery(theme.breakpoints.down('lg'))
+  const [open, setOpen] = useState(!isCompactViewport)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    setOpen(!isCompactViewport)
+  }, [isCompactViewport])
 
   return (
     <Drawer
@@ -77,7 +83,11 @@ export default function Sidebar() {
             )}
             {/* Botón de colapsar */}
 
-            <IconButton onClick={() => setOpen(!open)} sx={{color: theme.palette.primary.main}}>
+            <IconButton
+              onClick={() => setOpen(!open)}
+              aria-label={open ? 'Contraer menú lateral' : 'Expandir menú lateral'}
+              sx={{ color: theme.palette.primary.main }}
+            >
               {open ? <Close /> : <Menu />}
             </IconButton>
           </Box>

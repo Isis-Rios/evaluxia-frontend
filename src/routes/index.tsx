@@ -29,6 +29,7 @@ export default function AppRoutes() {
       <Route element={<PrivateRoute><AdminPanelLayout /></PrivateRoute>}>
         <Route path="/inicio" element={<HomePage />} />
         <Route path="/historial" element={<HistoryPage />} />
+        <Route path="/historial/:evaluationId" element={<HistoryPage />} />
 
         {/* Perfiles evaluadores */}
         <Route path="/perfiles" element={<UserEvaluatorProfilesPage />} />

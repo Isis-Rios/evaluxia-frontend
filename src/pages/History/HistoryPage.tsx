@@ -7,8 +7,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Collapse,
-  Divider,
   Paper,
   Table,
   TableBody,
@@ -19,19 +17,20 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import HistoryIcon from '@mui/icons-material/History'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import { useTheme } from '@mui/material/styles'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useEvaluations } from '@hooks/useEvaluations'
-import { useFindings } from '@hooks/useFindings'
-import { useReport } from '@hooks/useReport'
 import { useEvaluatorProfiles } from '@hooks/useEvaluatorProfiles'
-import FindingsAccordion from '@components/evaluations/FindingsAccordion'
-import EvaluationSummary from '@components/evaluations/EvaluationSummary'
-import IncompleteExplorationNotice from '@components/evaluations/IncompleteExplorationNotice'
-import { buildFindingSummary } from '@/types/evaluation.types'
-import type { Evaluation } from '@/types/evaluation.types'
+import { evaluationService } from '@services/evaluations/evaluation.service'
+import { findingsService } from '@services/findings/findings.service'
+import { reportsService } from '@services/reports/reports.service'
+import { snapshotsService, type SnapshotEvidenceItem } from '@services/snapshots/snapshots.service'
+import EvaluationResultsView from '@components/evaluations/EvaluationResultsView'
+import type { Evaluation, Finding, Report } from '@/types/evaluation.types'
+
 // ── Colores de estado ──────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; color: 'default' | 'info' | 'warning' | 'success' | 'error' }> = {
   pending:   { label: 'Pendiente',   color: 'default' },
@@ -39,239 +38,37 @@ const STATUS_CONFIG: Record<string, { label: string; color: 'default' | 'info' |
   completed: { label: 'Completada',  color: 'success' },
   failed:    { label: 'Fallida',     color: 'error' },
 }
-// ── Fila expandible ────────────────────────────────────────────────────────
-interface EvaluationRowProps {
-  evaluation: Evaluation
-  profileName?: string
-  profilesLoading?: boolean
+
+interface CachedEvaluationDetails {
+  findings: Finding[]
+  report: Report | null
+  snapshots: SnapshotEvidenceItem[]
+  loaded: boolean
 }
 
-function EvaluationRow({ evaluation, profileName, profilesLoading }: EvaluationRowProps) {
-  const [open, setOpen] = useState(false)
-  const [loaded, setLoaded] = useState(false)
-  const theme = useTheme()
-
-  const {
-    findings,
-    isLoading: isFindingsLoading,
-    error: findingsError,
-    fetchFindings,
-  } = useFindings()
-
-  const {
-    report,
-    isLoading: isReportLoading,
-    error: reportError,
-    fetchReportData,
-  } = useReport()
-
-  const canHaveReport = evaluation.auditStatus === 'completed'
-  const isDetailsLoading = isFindingsLoading || isReportLoading
-  const detailsError = findingsError || reportError
-
-  const loadData = useCallback(async () => {
-    try {
-      await Promise.all([
-        fetchFindings(evaluation._id),
-        canHaveReport ? fetchReportData(evaluation._id) : Promise.resolve(),
-      ])
-      setLoaded(true)
-    } catch {
-      // Si falla la petición, loaded permanece false para permitir reintentos
-    }
-  }, [evaluation._id, canHaveReport, fetchFindings, fetchReportData])
-
-  // Si la evaluación termina en segundo plano mientras el usuario está en el historial
-  const prevStatusRef = useRef(evaluation.status)
-  useEffect(() => {
-    if (prevStatusRef.current !== evaluation.status && evaluation.status === 'completed') {
-      if (open) {
-        loadData()
-      } else {
-        setLoaded(false)
-      }
-    }
-    prevStatusRef.current = evaluation.status
-  }, [evaluation.status, open, loadData])
-
-  const handleToggle = () => {
-    const nextOpen = !open
-    setOpen(nextOpen)
-
-    // Al abrir: si aún no se han cargado los datos (o hubo error previo), solicitarlos
-    if (nextOpen && !loaded && !isDetailsLoading) {
-      loadData()
-    }
-  }
-
-  const status = STATUS_CONFIG[evaluation.status] ?? { label: evaluation.status, color: 'default' }
-
-  const dateObj = new Date(evaluation.createdAt)
-  const formattedDate = dateObj.toLocaleDateString('es-MX', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  })
-  const formattedTime = dateObj.toLocaleTimeString('es-MX', {
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  })
-
-  const resolvedProfileName =
-    profileName ||
-    (typeof evaluation.evaluatorProfileId === 'object' && evaluation.evaluatorProfileId !== null
-      ? (evaluation.evaluatorProfileId as unknown as { fullName?: string })?.fullName
-      : undefined) ||
-    '—'
-
-  const summary = buildFindingSummary(findings)
-  return (
-    <>
-      <TableRow
-        hover
-        sx={{ cursor: 'pointer', '& > *': { borderBottom: 'unset' } }}
-        onClick={handleToggle}
-      >
-        <TableCell>
-          <Button
-            size="small"
-            variant="text"
-            sx={{ minWidth: 0, p: 0, color: 'text.secondary' }}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleToggle()
-            }}
-          >
-            {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-          </Button>
-        </TableCell>
-        <TableCell>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" fontWeight={600}>{evaluation.title}</Typography>
-            <Chip
-              label={evaluation.type === 'prototype' ? 'Prototipo' : 'Sitio web'}
-              size="small"
-              variant="outlined"
-              sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
-            />
-          </Box>
-          {evaluation.type === 'website' && evaluation.url ? (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              component="a"
-              href={evaluation.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              sx={{ textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
-            >
-              {evaluation.url}
-            </Typography>
-          ) : (
-            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 320 }}>
-              {evaluation.description || 'Sin descripción'}
-            </Typography>
-          )}
-        </TableCell>
-        <TableCell>
-          {profilesLoading && resolvedProfileName === '—' ? (
-            <CircularProgress size={16} />
-          ) : (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Avatar
-                sx={{
-                  width: 24,
-                  height: 24,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  bgcolor: theme.palette.primary.main,
-                  color: '#fff',
-                }}
-              >
-                {resolvedProfileName !== '—' ? resolvedProfileName.charAt(0).toUpperCase() : '?'}
-              </Avatar>
-              <Typography variant="body2" fontWeight={500} color="text.primary">
-                {resolvedProfileName}
-              </Typography>
-            </Box>
-          )}
-        </TableCell>
-        <TableCell>
-          <Tooltip title={dateObj.toISOString()} arrow>
-            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-              {formattedDate}, {formattedTime}
-            </Typography>
-          </Tooltip>
-        </TableCell>
-        <TableCell>
-          <Chip
-            label={status.label}
-            color={status.color}
-            size="small"
-            sx={{ fontWeight: 600 }}
-          />
-        </TableCell>
-      </TableRow>
-      {/* Fila expandible con findings y reporte */}
-      <TableRow>
-        <TableCell colSpan={5} sx={{ p: 0, border: 0 }}>
-          <Collapse in={open} timeout="auto" unmountOnExit>
-            <Box
-              sx={{
-                p: 3,
-                bgcolor: theme.palette.grey[50],
-                borderLeft: `4px solid ${theme.palette.primary.light}`,
-              }}
-            >
-              {isDetailsLoading && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1 }}>
-                  <CircularProgress size={20} />
-                  <Typography variant="body2" color="text.secondary">
-                    Cargando hallazgos y reporte...
-                  </Typography>
-                </Box>
-              )}
-              {detailsError && !isDetailsLoading && (
-                <Alert
-                  severity="error"
-                  sx={{ mb: 2 }}
-                  action={
-                    <Button color="inherit" size="small" onClick={loadData}>
-                      Reintentar
-                    </Button>
-                  }
-                >
-                  {detailsError}
-                </Alert>
-              )}
-              {!isDetailsLoading && !detailsError && loaded && (
-                <>
-                  {evaluation.status === 'completed' && (
-                    <IncompleteExplorationNotice
-                      blockingError={evaluation.flowState?.blockingError}
-                      terminationReason={evaluation.flowState?.terminationReason}
-                    />
-                  )}
-                  <EvaluationSummary
-                    summary={summary}
-                    report={report}
-                    evaluationType={evaluation.type === 'prototype' ? 'prototype' : 'website'}
-                  />
-                  <Divider sx={{ my: 2 }} />
-                  <FindingsAccordion findings={findings} />
-                </>
-              )}
-            </Box>
-          </Collapse>
-        </TableCell>
-      </TableRow>
-    </>
-  )
-}
-// ── Página ─────────────────────────────────────────────────────────────────
 const HISTORY_REFRESH_INTERVAL_MS = 5000
 
 export default function HistoryPage() {
+  const { evaluationId: routeEvaluationId } = useParams<{ evaluationId?: string }>()
+  const navigate = useNavigate()
+  const theme = useTheme()
+
   const { evaluations, isLoading, error, fetchEvaluations } = useEvaluations()
   const { profiles, isLoading: profilesLoading, fetchProfiles } = useEvaluatorProfiles()
+
+  // Evaluación seleccionada para la vista de detalle a ancho completo (fuera del <table>)
+  const [selectedEvaluationId, setSelectedEvaluationId] = useState<string | null>(routeEvaluationId ?? null)
+  const [directEvaluation, setDirectEvaluation] = useState<Evaluation | null>(null)
+  const [detailsCache, setDetailsCache] = useState<Record<string, CachedEvaluationDetails>>({})
+  const [isDetailsLoading, setIsDetailsLoading] = useState(false)
+  const [detailsError, setDetailsError] = useState<string | null>(null)
+
+  const detailsCacheRef = useRef(detailsCache)
+  detailsCacheRef.current = detailsCache
+
+  useEffect(() => {
+    setSelectedEvaluationId(routeEvaluationId ?? null)
+  }, [routeEvaluationId])
 
   useEffect(() => {
     fetchEvaluations(1, 50)
@@ -279,20 +76,14 @@ export default function HistoryPage() {
   }, [fetchEvaluations, fetchProfiles])
 
   const profileMap = useMemo(() => {
-    const map: Record<string, string> = {}
+    const map: Record<string, { fullName: string; archetype?: string }> = {}
     for (const p of profiles) {
-      map[p._id] = p.fullName
+      map[p._id] = { fullName: p.fullName, archetype: p.archetype }
     }
     return map
   }, [profiles])
 
-  // [Revisión MVP] La lista se pedía una sola vez: si el usuario abre el
-  // Historial mientras una evaluación sigue 'pending'/'running', el chip de
-  // estado se quedaba congelado ahí aunque la evaluación ya hubiera
-  // terminado en el backend, hasta que el usuario recargara la página a
-  // mano. Mientras exista al menos una fila no-terminal, se refresca la
-  // lista en segundo plano a intervalos cortos; se detiene en cuanto todas
-  // las evaluaciones visibles llegan a un estado terminal.
+  // Refresco en segundo plano mientras exista alguna evaluación en progreso
   const hasNonTerminalEvaluation = evaluations.some(
     (ev) => ev.status === 'pending' || ev.status === 'running' || ev.auditStatus === 'running',
   )
@@ -303,8 +94,182 @@ export default function HistoryPage() {
     }, HISTORY_REFRESH_INTERVAL_MS)
     return () => clearInterval(intervalId)
   }, [hasNonTerminalEvaluation, fetchEvaluations])
+
+  const selectedEvaluation = useMemo(() => {
+    if (!selectedEvaluationId) return null
+    return evaluations.find((ev) => ev._id === selectedEvaluationId) ?? (directEvaluation?._id === selectedEvaluationId ? directEvaluation : null)
+  }, [selectedEvaluationId, evaluations, directEvaluation])
+
+  const loadEvaluationDetails = useCallback(async (ev: Evaluation, forceReload = false) => {
+    const cached = detailsCacheRef.current[ev._id]
+    if (cached?.loaded && !forceReload) {
+      setDetailsError(null)
+      return
+    }
+
+    setIsDetailsLoading(true)
+    setDetailsError(null)
+    try {
+      const canHaveReport = ev.auditStatus === 'completed'
+      const [findingsRes, reportRes, snapshotsRes] = await Promise.all([
+        findingsService.getByEvaluationId(ev._id).catch((err) => {
+          if (err?.response?.status === 404) return [] as Finding[]
+          throw err
+        }),
+        canHaveReport ? reportsService.getByEvaluationId(ev._id).catch(() => null) : Promise.resolve(null),
+        canHaveReport && ev.type !== 'prototype'
+          ? snapshotsService.getByEvaluationId(ev._id).catch(() => [] as SnapshotEvidenceItem[])
+          : Promise.resolve([] as SnapshotEvidenceItem[]),
+      ])
+
+      setDetailsCache((prev) => ({
+        ...prev,
+        [ev._id]: {
+          findings: findingsRes,
+          report: reportRes,
+          snapshots: snapshotsRes,
+          loaded: true,
+        },
+      }))
+    } catch {
+      setDetailsError('No se pudieron cargar los resultados de esta evaluación.')
+    } finally {
+      setIsDetailsLoading(false)
+    }
+  }, [])
+
+  // Si se abre por ruta directa `/historial/:evaluationId` y la evaluación aún no está en la lista
+  useEffect(() => {
+    if (!selectedEvaluationId) return
+    if (selectedEvaluation) {
+      loadEvaluationDetails(selectedEvaluation)
+      return
+    }
+    if (!isLoading) {
+      let cancelled = false
+      setIsDetailsLoading(true)
+      evaluationService
+        .getById(selectedEvaluationId)
+        .then((ev) => {
+          if (cancelled) return
+          setDirectEvaluation(ev)
+          loadEvaluationDetails(ev)
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setDetailsError('No se encontró la evaluación solicitada.')
+            setIsDetailsLoading(false)
+          }
+        })
+      return () => {
+        cancelled = true
+      }
+    }
+  }, [selectedEvaluationId, selectedEvaluation, isLoading, loadEvaluationDetails])
+
+  // Si la evaluación abierta termina en segundo plano, recargar sus detalles
+  const prevSelectedStatusRef = useRef<string | undefined>(selectedEvaluation?.status)
+  useEffect(() => {
+    if (
+      selectedEvaluation &&
+      prevSelectedStatusRef.current &&
+      prevSelectedStatusRef.current !== selectedEvaluation.status &&
+      selectedEvaluation.status === 'completed'
+    ) {
+      loadEvaluationDetails(selectedEvaluation, true)
+    }
+    prevSelectedStatusRef.current = selectedEvaluation?.status
+  }, [selectedEvaluation, loadEvaluationDetails])
+
+  const handleOpenEvaluation = (ev: Evaluation) => {
+    setSelectedEvaluationId(ev._id)
+    if (routeEvaluationId !== ev._id) {
+      navigate(`/historial/${ev._id}`)
+    }
+  }
+
+  const handleBackToList = () => {
+    setSelectedEvaluationId(null)
+    setDetailsError(null)
+    if (routeEvaluationId) {
+      navigate('/historial')
+    }
+  }
+
+  const resolveProfileInfo = (ev: Evaluation) => {
+    if (typeof ev.evaluatorProfileId === 'string' && profileMap[ev.evaluatorProfileId]) {
+      return profileMap[ev.evaluatorProfileId]
+    }
+    if (typeof ev.evaluatorProfileId === 'object' && ev.evaluatorProfileId !== null) {
+      const obj = ev.evaluatorProfileId as unknown as { fullName?: string; archetype?: string }
+      if (obj.fullName) return { fullName: obj.fullName, archetype: obj.archetype }
+    }
+    return { fullName: '—', archetype: undefined }
+  }
+
+  // ── VISTA DE DETALLE A ANCHO COMPLETO (FUERA DE LA TABLA PRINCIPAL) ───────
+  if (selectedEvaluationId) {
+    const cached = detailsCache[selectedEvaluationId]
+    const profileInfo = selectedEvaluation ? resolveProfileInfo(selectedEvaluation) : { fullName: '—', archetype: undefined }
+
+    return (
+      <Box sx={{ width: '100%', minWidth: 0 }}>
+        <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+          <Button
+            type="button"
+            variant="outlined"
+            size="small"
+            startIcon={<ArrowBackIcon fontSize="small" />}
+            onClick={handleBackToList}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            Volver al historial
+          </Button>
+        </Box>
+
+        {isDetailsLoading && !cached?.loaded && (
+          <Paper elevation={0} sx={{ p: 4, border: '1px solid #e0d9f9', borderRadius: 2, textAlign: 'center' }}>
+            <CircularProgress size={28} sx={{ mb: 1.5 }} />
+            <Typography variant="body2" color="text.secondary">
+              Cargando hallazgos, evidencias y reporte...
+            </Typography>
+          </Paper>
+        )}
+
+        {detailsError && !isDetailsLoading && (
+          <Alert
+            severity="error"
+            sx={{ mb: 2 }}
+            action={
+              selectedEvaluation ? (
+                <Button color="inherit" size="small" onClick={() => loadEvaluationDetails(selectedEvaluation, true)}>
+                  Reintentar
+                </Button>
+              ) : undefined
+            }
+          >
+            {detailsError}
+          </Alert>
+        )}
+
+        {selectedEvaluation && cached?.loaded && !detailsError && (
+          <EvaluationResultsView
+            evaluation={selectedEvaluation}
+            evaluationType={selectedEvaluation.type === 'prototype' ? 'prototype' : 'website'}
+            report={cached.report}
+            findings={cached.findings}
+            snapshots={cached.snapshots}
+            profileName={profileInfo.fullName !== '—' ? profileInfo.fullName : undefined}
+            profileArchetype={profileInfo.archetype}
+          />
+        )}
+      </Box>
+    )
+  }
+
+  // ── VISTA DE LISTADO DEL HISTORIAL (TABLA LIGERA SIN DETALLES ANIDADOS) ───
   return (
-    <Box>
+    <Box sx={{ width: '100%', minWidth: 0 }}>
       {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
         <HistoryIcon color="primary" sx={{ fontSize: 28 }} />
@@ -313,18 +278,21 @@ export default function HistoryPage() {
             Historial de evaluaciones
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {!isLoading && `${evaluations.length} evaluaciones registradas`}
+            {!isLoading && `${evaluations.length} evaluaciones registradas · Seleccione una evaluación para abrir su reporte completo`}
           </Typography>
         </Box>
       </Box>
+
       {/* Error */}
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
       {/* Loading */}
       {isLoading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 6 }}>
           <CircularProgress />
         </Box>
       )}
+
       {/* Vacío */}
       {!isLoading && evaluations.length === 0 && !error && (
         <Box sx={{ textAlign: 'center', mt: 8, color: 'text.secondary' }}>
@@ -333,32 +301,133 @@ export default function HistoryPage() {
           <Typography variant="body2">Ejecuta tu primera evaluación desde "Evaluar sitio web".</Typography>
         </Box>
       )}
-      {/* Tabla */}
+
+      {/* Tabla ligera (sin filas expandibles anidadas) */}
       {!isLoading && evaluations.length > 0 && (
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e0e0e0', borderRadius: 2 }}>
-          <Table>
+          <Table sx={{ tableLayout: { xs: 'auto', md: 'fixed' }, width: '100%' }}>
             <TableHead>
               <TableRow sx={{ bgcolor: '#f8f6ff' }}>
-                <TableCell width={48} />
-                <TableCell><Typography fontWeight={700} variant="body2">Evaluación</Typography></TableCell>
-                <TableCell><Typography fontWeight={700} variant="body2">Perfil evaluador</Typography></TableCell>
-                <TableCell><Typography fontWeight={700} variant="body2">Fecha y hora</Typography></TableCell>
-                <TableCell><Typography fontWeight={700} variant="body2">Estado</Typography></TableCell>
+                <TableCell sx={{ width: { md: '40%' } }}><Typography fontWeight={700} variant="body2">Evaluación</Typography></TableCell>
+                <TableCell sx={{ width: { md: '20%' } }}><Typography fontWeight={700} variant="body2">Perfil evaluador</Typography></TableCell>
+                <TableCell sx={{ width: { md: '16%' } }}><Typography fontWeight={700} variant="body2">Fecha y hora</Typography></TableCell>
+                <TableCell sx={{ width: { md: '12%' } }}><Typography fontWeight={700} variant="body2">Estado</Typography></TableCell>
+                <TableCell align="right" sx={{ width: { md: '12%' } }}><Typography fontWeight={700} variant="body2">Acción</Typography></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {evaluations.map((ev) => (
-                <EvaluationRow
-                  key={ev._id}
-                  evaluation={ev}
-                  profileName={
-                    typeof ev.evaluatorProfileId === 'string'
-                      ? profileMap[ev.evaluatorProfileId]
-                      : undefined
-                  }
-                  profilesLoading={profilesLoading}
-                />
-              ))}
+              {evaluations.map((ev) => {
+                const status = STATUS_CONFIG[ev.status] ?? { label: ev.status, color: 'default' }
+                const dateObj = new Date(ev.createdAt)
+                const formattedDate = dateObj.toLocaleDateString('es-MX', {
+                  day: '2-digit', month: 'short', year: 'numeric',
+                })
+                const formattedTime = dateObj.toLocaleTimeString('es-MX', {
+                  hour: '2-digit', minute: '2-digit', hour12: false,
+                })
+                const profileInfo = resolveProfileInfo(ev)
+
+                return (
+                  <TableRow
+                    key={ev._id}
+                    hover
+                    sx={{ cursor: 'pointer' }}
+                    onClick={() => handleOpenEvaluation(ev)}
+                  >
+                    <TableCell sx={{ overflowWrap: 'anywhere' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <Typography variant="body2" fontWeight={600}>
+                          {ev.title}
+                        </Typography>
+                        <Chip
+                          label={ev.type === 'prototype' ? 'Prototipo' : 'Sitio web'}
+                          size="small"
+                          variant="outlined"
+                          sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+                        />
+                      </Box>
+                      {ev.type === 'website' && ev.url ? (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          component="a"
+                          href={ev.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          sx={{
+                            display: 'block',
+                            textDecoration: 'none',
+                            overflowWrap: 'anywhere',
+                            '&:hover': { textDecoration: 'underline' },
+                          }}
+                        >
+                          {ev.url}
+                        </Typography>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: '100%' }}>
+                          {ev.description || 'Sin descripción'}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {profilesLoading && profileInfo.fullName === '—' ? (
+                        <CircularProgress size={16} />
+                      ) : (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                          <Avatar
+                            sx={{
+                              width: 24,
+                              height: 24,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              bgcolor: theme.palette.primary.main,
+                              color: '#fff',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {profileInfo.fullName !== '—' ? profileInfo.fullName.charAt(0).toUpperCase() : '?'}
+                          </Avatar>
+                          <Typography variant="body2" fontWeight={500} color="text.primary" noWrap>
+                            {profileInfo.fullName}
+                          </Typography>
+                        </Box>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title={dateObj.toISOString()} arrow>
+                        <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                          {formattedDate}, {formattedTime}
+                        </Typography>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={status.label}
+                        color={status.color}
+                        size="small"
+                        sx={{ fontWeight: 600 }}
+                      />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Button
+                        type="button"
+                        size="small"
+                        variant="outlined"
+                        endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleOpenEvaluation(ev)
+                        }}
+                        aria-label={`Ver resultados de ${ev.title}`}
+                        sx={{ textTransform: 'none', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}
+                      >
+                        Ver
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </TableContainer>
@@ -366,4 +435,3 @@ export default function HistoryPage() {
     </Box>
   )
 }
-

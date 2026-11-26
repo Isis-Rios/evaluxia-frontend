@@ -3,27 +3,24 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
-  Divider,
+  Button,
   Grid,
   Snackbar,
   Typography,
 } from '@mui/material'
 import LanguageIcon from '@mui/icons-material/Language'
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'
 import { useNavigate } from 'react-router-dom'
 
 import { useEvaluatorProfiles } from '@hooks/useEvaluatorProfiles'
 import { useEvaluations } from '@hooks/useEvaluations'
 import { useFindings } from '@hooks/useFindings'
 import { useReport } from '@hooks/useReport'
-import { buildFindingSummary } from '@/types/evaluation.types'
 
 import ActiveProfileCard from '@components/evaluations/ActiveProfileCard'
 import EvaluationForm from '@components/evaluations/EvaluationForm'
 import EvaluationRunningState from '@components/evaluations/EvaluationRunningState'
-import EvaluationSummary from '@components/evaluations/EvaluationSummary'
-import FindingsAccordion from '@components/evaluations/FindingsAccordion'
-import IncompleteExplorationNotice from '@components/evaluations/IncompleteExplorationNotice'
-import IterationTimeline from '@components/evaluations/IterationTimeline'
+import EvaluationResultsView from '@components/evaluations/EvaluationResultsView'
 import type { EvaluationFormValues } from '@components/evaluations/EvaluationForm'
 
 export default function EvaluateWebPage() {
@@ -71,13 +68,11 @@ export default function EvaluateWebPage() {
       type: 'website',
       url: values.url,
     })
-    if (!result) return // error ya manejado en el hook
+    if (!result) return
   }
 
-  const summary = buildFindingSummary(findings)
-
   return (
-    <Box>
+    <Box sx={{ width: '100%', minWidth: 0 }}>
       {/* ── Header ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
         <LanguageIcon color="primary" sx={{ fontSize: 28 }} />
@@ -91,101 +86,83 @@ export default function EvaluateWebPage() {
         </Box>
       </Box>
 
-      <Grid container spacing={3}>
-        {/* ── Sidebar: perfil activo ── */}
-        <Grid size={{ xs: 12, md: 3 }}>
-          {!profilesLoading && (
-            activeProfile ? (
-              <Box>
-                <Typography variant="caption" color="text.secondary" fontWeight={600} textAlign={'center'} sx={{ mb: 1, display: 'block' }}>
-                  PERFIL EVALUADOR ACTIVO
-                </Typography>
-                <ActiveProfileCard profile={activeProfile} />
-              </Box>
-            ) : (
-              <Alert
-                severity="warning"
-                action={
-                  <Box
-                    component="span"
-                    onClick={() => navigate('/perfiles')}
-                    sx={{ cursor: 'pointer', fontWeight: 700, textDecoration: 'underline', fontSize: 13 }}
-                  >
-                    Ir a perfiles
-                  </Box>
-                }
-              >
-                No hay un perfil evaluador activo.
-              </Alert>
-            )
-          )}
-        </Grid>
-
-        {/* ── Contenido principal ── */}
-        <Grid size={{ xs: 12, md: 9 }}>
-          {/* Formulario — solo visible si no está corriendo */}
-          {!isCreating && !showResults && (
-            <Box>
-              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                Configurar evaluación
-              </Typography>
-              <EvaluationForm
-                onSubmit={handleSubmit}
-                isLoading={isCreating}
-                error={evalError}
-              />
-            </Box>
-          )}
-
-          {/* Estado "en progreso" */}
-          {isCreating && <EvaluationRunningState evaluation={currentEvaluation} />}
-
-          {/* Resultados */}
-          {showResults && !isCreating && (
-            <Box>
-              <IncompleteExplorationNotice
-                blockingError={currentEvaluation?.flowState?.blockingError}
-                terminationReason={currentEvaluation?.flowState?.terminationReason}
-              />
-
-              {/* Resumen */}
-              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                Resumen ejecutivo
-              </Typography>
-              <EvaluationSummary
-                summary={summary}
-                title={currentEvaluation?.title}
-                url={currentEvaluation?.url}
-                report={report}
-              />
-
-              <Divider sx={{ my: 3 }} />
-
-              {/* Timeline Visual de la Simulación */}
-              <IterationTimeline snapshots={snapshots} />
-
-              <Divider sx={{ my: 3 }} />
-
-              {/* Findings */}
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="subtitle1" fontWeight={700}>
-                  Hallazgos ({findings.length})
-                </Typography>
-              </Box>
-
-              {findingsError && (
-                <Alert severity="error" sx={{ mb: 2 }}>{findingsError}</Alert>
-              )}
-
-              {findingsLoading ? (
-                <Typography color="text.secondary">Cargando hallazgos...</Typography>
+      {/* Cuando finaliza la evaluación, los resultados aprovechan el 100 % del ancho sin columna lateral de perfil */}
+      {showResults && !isCreating ? (
+        <EvaluationResultsView
+          evaluation={currentEvaluation}
+          evaluationType="website"
+          report={report}
+          findings={findings}
+          snapshots={snapshots}
+          profileName={activeProfile?.fullName}
+          profileArchetype={activeProfile?.archetype}
+          findingsLoading={findingsLoading}
+          findingsError={findingsError}
+          headerAction={
+            <Button
+              type="button"
+              variant="outlined"
+              size="small"
+              startIcon={<AddCircleOutlineIcon fontSize="small" />}
+              onClick={() => setShowResults(false)}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              Nueva evaluación
+            </Button>
+          }
+        />
+      ) : (
+        <Grid container spacing={3}>
+          {/* ── Columna perfil activo (solo durante configuración / ejecución) ── */}
+          <Grid size={{ xs: 12, md: 3 }}>
+            {!profilesLoading && (
+              activeProfile ? (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600} textAlign={'center'} sx={{ mb: 1, display: 'block' }}>
+                    PERFIL EVALUADOR ACTIVO
+                  </Typography>
+                  <ActiveProfileCard profile={activeProfile} />
+                </Box>
               ) : (
-                <FindingsAccordion findings={findings} />
-              )}
-            </Box>
-          )}
+                <Alert
+                  severity="warning"
+                  action={
+                    <Button
+                      type="button"
+                      color="inherit"
+                      size="small"
+                      onClick={() => navigate('/perfiles')}
+                      sx={{ fontWeight: 700, textTransform: 'none' }}
+                    >
+                      Ir a perfiles
+                    </Button>
+                  }
+                >
+                  No hay un perfil evaluador activo.
+                </Alert>
+              )
+            )}
+          </Grid>
+
+          {/* ── Contenido principal (formulario o estado en progreso) ── */}
+          <Grid size={{ xs: 12, md: 9 }}>
+            {!isCreating && (
+              <Box>
+                <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+                  Configurar evaluación
+                </Typography>
+                <EvaluationForm
+                  onSubmit={handleSubmit}
+                  isLoading={isCreating}
+                  error={evalError}
+                />
+              </Box>
+            )}
+
+            {isCreating && <EvaluationRunningState evaluation={currentEvaluation} />}
+          </Grid>
         </Grid>
-      </Grid>
+      )}
 
       {/* ── Snackbar de éxito ── */}
       <Snackbar
