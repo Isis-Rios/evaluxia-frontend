@@ -8,16 +8,21 @@ export interface SnapshotEvidenceItem {
   evaluationId: string
   iteration: number
   url: string
+  action?: {
+    actionType: string
+    description: string
+    targetElement?: string
+  }
   actionExecuted?: string
   screenshotPath?: string
   screenshotUrl?: string
   timestamp: string
   headings?: Array<{ level: number; text: string; selector: string }>
-  images?: Array<{ src: string; alt: string | null; role: string | null; selector: string }>
+  images?: Array<{ src: string; alt: string | null; role: string | null; selector: string; isDecorative?: boolean }>
   links?: Array<{ href: string; text: string; ariaLabel: string | null; selector: string }>
-  buttons?: Array<{ text: string; ariaLabel: string | null; disabled: boolean; selector: string }>
-  forms?: Array<{ id: string | null; name: string | null; action: string | null }>
-  landmarks?: Array<{ role: string; ariaLabel: string | null; selector: string }>
+  buttons?: Array<{ text: string | null; ariaLabel: string | null; disabled?: boolean; isDisabled?: boolean; selector: string; tag?: string }>
+  forms?: Array<{ id?: string | null; selector?: string; name: string | null; action: string | null; elements?: unknown[] }>
+  landmarks?: Array<{ role?: string; type?: string; ariaLabel: string | null; selector: string }>
 }
 
 export interface SnapshotsResponse {

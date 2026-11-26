@@ -1,6 +1,6 @@
 // src/components/evaluations/EvaluationSummary.test.tsx
 import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import EvaluationSummary from './EvaluationSummary'
 import { buildFindingSummary } from '@/types/evaluation.types'
 import type { Report, FindingSummary, Finding } from '@/types/evaluation.types'
@@ -70,6 +70,38 @@ describe('EvaluationSummary — executive summary (report.summary)', () => {
       />,
     )
     expect(screen.getByText('82 / 100')).toBeTruthy()
+  })
+
+  it('prioritizes the brief AI narrative when report.summary contains a long verified findings dump (EJE-10 pattern) while keeping the full original text expandable', () => {
+    const longSummary = [
+      'RESULTADOS VERIFICADOS POR EVALUXIA (FUENTE AUTORITATIVA)',
+      '1. Criterio: WCAG 2.4.4 | Enlace sin texto accesible #1',
+      '2. Criterio: WCAG 2.4.4 | Enlace sin texto accesible #2',
+      'ANÁLISIS NARRATIVO COMPLEMENTARIO (IA, NO AUTORITATIVO)',
+      'El siguiente texto fue generado por IA y puede incluir observaciones adicionales.',
+      '### Resumen Ejecutivo de Auditoría UX y Accesibilidad',
+      'Flujo principal ágil pero con 3 incumplimientos normativos detectados.',
+    ].join('\n')
+
+    render(
+      <EvaluationSummary
+        summary={emptySummary}
+        report={makeReport({ summary: longSummary })}
+      />,
+    )
+
+    // Muestra primero la narrativa breve
+    expect(screen.getByText(/Flujo principal ágil pero con 3 incumplimientos normativos detectados/i)).toBeTruthy()
+    // No vuelca el listado masivo antes del botón de expansión
+    expect(screen.queryByText(/Enlace sin texto accesible #1/i)).toBeNull()
+
+    // Al pulsar el botón accesible, muestra el informe íntegro original sin modificarlo
+    const btn = screen.getByRole('button', { name: /Ver informe textual completo original/i })
+    expect(btn.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(btn)
+    expect(btn.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText(/RESULTADOS VERIFICADOS POR EVALUXIA/i)).toBeTruthy()
+    expect(screen.getByText(/Enlace sin texto accesible #2/i)).toBeTruthy()
   })
 })
 
@@ -264,5 +296,40 @@ describe('EvaluationSummary + FindingsAccordion — NOT_EVALUABLE persisted find
     expect(screen.getByText('PASS: 5')).toBeTruthy()
     expect(screen.getByText('FAIL: 2')).toBeTruthy()
     expect(screen.getByText('NOT_EVALUABLE: 13')).toBeTruthy()
+  })
+
+  it('EJE-14 prototype: distinguishes persisted null domain compliance from reconstructed Nielsen/WCAG breakdown without altering overallScore', () => {
+    const eje14Findings: Finding[] = [
+      makeFinding({ _id: '1', findingGroup: 'accessibility', type: 'visual', status: 'NOT_EVALUABLE', severity: 'info', wcagCriterion: 'WCAG 1.4.3 Contraste mínimo' }),
+      makeFinding({ _id: '2', findingGroup: 'accessibility', type: 'visual', status: 'NOT_EVALUABLE', severity: 'info', wcagCriterion: 'WCAG 1.4.3 Contraste mínimo' }),
+      makeFinding({ _id: '3', findingGroup: 'accessibility', type: 'visual', status: 'FAIL', severity: 'medium', wcagCriterion: 'WCAG 1.4.1 Uso del color' }),
+      makeFinding({ _id: '4', findingGroup: 'ux', type: 'usability', status: 'FAIL', severity: 'low', heuristicCode: 'N-08' }),
+      makeFinding({ _id: '5', findingGroup: 'ux', type: 'content', status: 'FAIL', severity: 'medium', heuristicCode: 'N-04' }),
+      makeFinding({ _id: '6', findingGroup: 'ux', type: 'interaction', status: 'PASS', severity: 'info', heuristicCode: 'N-06' }),
+      makeFinding({ _id: '7', findingGroup: 'accessibility', type: 'wcag', status: 'PASS', severity: 'info', wcagCriterion: 'WCAG 2.4.6 Encabezados y etiquetas' }),
+    ]
+
+    render(
+      <EvaluationSummary
+        summary={buildFindingSummary(eje14Findings)}
+        evaluationType="prototype"
+        findings={eje14Findings}
+        report={makeReport({
+          overallScore: 25,
+          nielsenCompliance: null,
+          wcagCompliance: null,
+          passCount: 2,
+          failCount: 3,
+          notEvaluableCount: 2,
+          coverage: { applicableCriteria: 13, evaluatedCriteria: 5, notEvaluableCriteria: 8, outOfCoverageCriteria: 6 },
+        })}
+      />,
+    )
+
+    expect(screen.getByText('25 / 100')).toBeTruthy()
+    expect(screen.getByText(/no persiste tasa de cumplimiento desagregada por dominio/i)).toBeTruthy()
+    expect(screen.getByText(/Desglose reconstruido \(desde hallazgos\):/i)).toBeTruthy()
+    expect(screen.getByText('33.33%')).toBeTruthy()
+    expect(screen.getByText('50%')).toBeTruthy()
   })
 })

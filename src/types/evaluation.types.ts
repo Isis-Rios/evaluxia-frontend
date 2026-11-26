@@ -21,6 +21,27 @@ export interface EvaluationMetrics {
   totalTokens: number
   estimatedCostUsd: number
   cumulativeCostUsd: number
+  thinkingTokens?: number
+  costStatus?: 'confirmed' | 'confirmed-excludes-unverified-thinking-cost' | 'unverified-model-rate'
+  metricsAudit?: {
+    consolidatedByStatus: { FAIL: number; PASS: number; NOT_EVALUABLE: number }
+    expectedPersistedFindingsCount: number
+    persistedFindingsCount?: number
+    note: string
+  }
+  explorationIntegrity?: {
+    complete: boolean
+    interruptionReason: string | null
+    terminationReason:
+      | 'NATURAL_STOP'
+      | 'MAX_ITERATIONS_REACHED'
+      | 'ACTION_FAILED'
+      | 'INVALID_ACTION_DECISION'
+      | 'EXPLORATION_ERROR'
+      | 'UNKNOWN'
+    evidenceFullyVerified?: boolean
+    snapshotPersistenceFailureCount?: number
+  }
 }
 
 export interface DomainMetrics {
@@ -66,6 +87,8 @@ export interface Report {
     notEvaluableCriteria: number
     outOfCoverageCriteria: number
   }
+  findingPersistencePolicy?: 'PASS_PERSISTED' | 'PASS_DISCARDED'
+  geminiModel?: string
   generatedAt?: string
 }
 
@@ -95,6 +118,7 @@ export interface Evaluation {
     blockingError: string | null
     /** P1.2/P1.2.2 (backend) — ausente en evaluaciones persistidas antes de ese cambio. */
     terminationReason?: 'NATURAL_STOP' | 'MAX_ITERATIONS_REACHED' | 'ACTION_FAILED' | 'INVALID_ACTION_DECISION' | 'EXPLORATION_ERROR' | 'UNKNOWN'
+    maxIterationsUsed?: number
     snapshotIntegrity?: {
       persistenceFailures: Array<{ iteration: number; error: string }>
       lastActionVerifiedBySnapshot: boolean
@@ -182,6 +206,16 @@ export interface AffectedElement {
   }
 }
 
+export interface ConsolidationDiscrepancy {
+  origin: 'deterministic' | 'ai'
+  status: FindingStatus
+  severity: FindingSeverity
+  confidence: FindingConfidence
+  description: string
+  recommendation?: string | null
+  evidence?: TechnicalEvidenceItem[]
+}
+
 export interface Finding {
   _id: string
   id: string
@@ -202,6 +236,7 @@ export interface Finding {
   impact?: string
   recommendation?: string | null
   screenshotUrl?: string
+  discrepancy?: ConsolidationDiscrepancy
   affectedArchetypeTraits?: string[]
   createdAt: string
   updatedAt: string
